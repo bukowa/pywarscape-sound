@@ -1,0 +1,40 @@
+default_language_version:
+  python: python3.12
+
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.17.3
+    hooks:
+      - id: ruff
+        args: [--fix]
+        files: ^(src|scripts|tests)/
+      - id: ruff-format
+        files: ^(src|scripts|tests)/
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: check-added-large-files
+        args: [--maxkb=4000]
+      - id: check-case-conflict
+      - id: check-merge-conflict
+      - id: check-toml
+      - id: check-yaml
+      - id: detect-private-key
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+
+  - repo: local
+    hooks:
+      - id: ty-check
+        name: ty type check
+        entry: uv run ty check src
+        language: system
+        pass_filenames: false
+        always_run: true
+      - id: arch-guard
+        name: architecture guard
+        entry: uv run scripts/arch_guard.py
+        language: system
+        pass_filenames: false
+        always_run: true

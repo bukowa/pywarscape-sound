@@ -1,0 +1,60 @@
+"""Layer 2 Pure Engine package for SoundBank mutation, graphs, and integrity."""
+
+from src.engine.catalog_discovery import build_audio_catalog_for_bank
+from src.engine.ontology import (
+    AppendVariationIntent,
+    AudioMutationEffectIntent,
+    AudioMutationPlan,
+    AudioReplacementSource,
+    AudioStreamMode,
+    BankName,
+    ContainerVariationTarget,
+    CrossBankCloneSource,
+    ExistingMediaReferenceSource,
+    ExternalFileSource,
+    HircId,
+    MarkBankModifiedIntent,
+    MusicTrackTarget,
+    MutationTarget,
+    PlanRejection,
+    SilentStubSource,
+    SoundNodeTarget,
+    StageLooseWemIntent,
+    StageMasterAudioIntent,
+    SyncMusicTimelineIntent,
+    UpdateSoundNodeIntent,
+    WemId,
+)
+from src.engine.planner import plan_audio_replacement, try_plan_audio_replacement
+from src.engine.session import WorkspaceSession
+from src.models import AudioCatalogEntry
+
+__all__ = [
+    "AppendVariationIntent",
+    "AudioCatalogEntry",
+    "AudioMutationEffectIntent",
+    "AudioMutationPlan",
+    "AudioReplacementSource",
+    "AudioStreamMode",
+    "BankName",
+    "ContainerVariationTarget",
+    "CrossBankCloneSource",
+    "ExistingMediaReferenceSource",
+    "ExternalFileSource",
+    "HircId",
+    "MarkBankModifiedIntent",
+    "MusicTrackTarget",
+    "MutationTarget",
+    "PlanRejection",
+    "SilentStubSource",
+    "SoundNodeTarget",
+    "StageLooseWemIntent",
+    "StageMasterAudioIntent",
+    "SyncMusicTimelineIntent",
+    "UpdateSoundNodeIntent",
+    "WemId",
+    "WorkspaceSession",
+    "build_audio_catalog_for_bank",
+    "plan_audio_replacement",
+    "try_plan_audio_replacement",
+]

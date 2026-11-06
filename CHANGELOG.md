@@ -1,0 +1,43 @@
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [0.1.0] - 2026-11-06
+
+### Added
+- **Multi-Game SoundBank Parsing & Serialization**:
+  - Pure Python Audiokinetic Wwise SoundBank (`.bnk`) AST parser and bit-exact serializer.
+  - Dedicated Total War: Attila parser (`parser_attila.py`) supporting Wwise v112 SoundBanks.
+  - Dedicated Total War: Rome II parser (`parser_rome2.py`) supporting both legacy Wwise v88 and modern v112 SoundBanks with typed `CAkAttenuationV88` curves and bit-exact fallback.
+  - Verified 100% bit-exact round-trip preservation across all 105 Rome II banks and 126 Attila vanilla banks.
+- **Audio Conversion & Processing**:
+  - Integrated PyAV transcode pipeline converting `.wav`, `.mp3`, `.ogg`, and `.flac` into game-compliant 32 kHz mono 16-bit PCM `.wem` audio.
+  - Audio enhancement tools: Gain adjustment, peak normalization, target RMS matching, and preview playback.
+  - In-app playback auditioning of `.wem` audio via bundled, integrity-verified `vgmstream`.
+- **PFH4 Container & Game Packaging**:
+  - Retail PFH4 `.pack` extraction and retail decryption.
+  - Game-compliant Movie pack (`PT_MOVIE`) and Mod pack (`PT_MOD`) compilation into project directory with optional automatic copy to game data directory.
+- **Engine Mutation Pipeline**:
+  - Two-phase mutation pipeline (`plan_batch` -> `effectuate_plan`) ensuring SoundBanks are never half-corrupted.
+  - Transactional cross-bank Undo and Redo with rollback snapshots for bank bytes, staged audio, and graph indices.
+  - Sound muting via zero-byte audio stubs.
+  - Mod pack corruption repair (word-swapped automation points, bad DIDX headers).
+- **Desktop Graphical Interface (PySide6)**:
+  - 4-file Model-View-Update (MVU) architecture (`state.py`, `causation.py`, `store.py`, `view.py`).
+  - Project Hub: Open/create projects, track recent projects, scan game installations.
+  - Project Wizard: Multi-game project setup, asset extraction, dependency configuration.
+  - SoundBank Viewer: Hierarchical AST inspection, DIDX media table, property inspector, cross-bank jump navigation.
+  - Audio Sources Panel: Searchable game audio catalog, metadata resolvers, external file imports, multi-selection replacement.
+  - Audio Transport Bar: Waveform seek bar, playback controls, volume slider, looping.
+  - Pack Repair View: Diagnostic scanner for corrupted mod packs with automated one-click healing.
+  - High-contrast dark theme design system with centralized semantic design tokens.
+  - AI-assistance startup disclaimer and GitHub contribution guide.
+- **Security & Quality**:
+  - Full GitHub Actions CI with action versions pinned to commit SHAs.
+  - CodeQL automated security scanning and vulnerability analysis.
+  - Dependency vulnerability auditing via `pip-audit`.
+  - Binary integrity verification for bundled binaries (`test_vgmstream_integrity.py`).
+  - Hermetic automated test suite with over 900 tests, strict architecture boundary enforcement (`arch_guard.py`), and zero `PySide6` imports in headless layers.

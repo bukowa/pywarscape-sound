@@ -1,0 +1,72 @@
+# Python environment / uv
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Large archives and installers
+*.7z
+*.zip
+*.exe
+AudiokineticLauncher*
+
+# Audio source files and caches
+/audio_sources/
+.cache/
+
+# Build outputs and temporary files
+*.tmp
+temp_prep.wav
+prep_audio.wav
+sources.wsources
+dist/
+build/
+build_temp/
+scratch/
+data/autosaves/
+data/game_bnks/
+data/cache_vanilla/
+.coverage
+
+# Local tools
+tools/wwise/
+tools/rpfm/
+!tools/vgmstream/
+!tools/vgmstream/**
+*.bnk
+*.wem
+*.pack
+tests/data/*.pack
+data/*.pack
+*.validationcache
+*.bak
+settings.json
+recent_projects.json
+projects/
+*.log
+logs/
+
+# Archived legacy workspace artifacts
+.old/
+warscape_community_editor/
+.superpowers/
+
+# Local research and documentation
+docs/
+
+# IDEs and editors
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Operating system files
+.DS_Store
+Thumbs.db
+
+# Test coverage reports and temporary tool outputs
+htmlcov/
+repomix-output.*

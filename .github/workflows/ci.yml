@@ -1,0 +1,105 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Lint & Type Checking
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.4.2
+        with:
+          python-version: "3.12"
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --all-groups
+
+      - name: Ruff Format Check
+        run: uv run ruff format --check src scripts tests
+
+      - name: Ruff Linter
+        run: uv run ruff check src scripts tests
+
+      - name: ty Type Checker
+        run: uv run ty check src
+
+  arch-guard:
+    name: Architecture & Cleanliness
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.4.2
+        with:
+          python-version: "3.12"
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --all-groups
+
+      - name: Run Architecture Guard
+        run: uv run python scripts/arch_guard.py
+
+      - name: Run Cleanliness Suite
+        run: uv run pytest tests/test_cleanliness.py -q
+
+  security:
+    name: Security & Binary Integrity
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.4.2
+        with:
+          python-version: "3.12"
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --all-groups
+
+      - name: Verify vgmstream SHA-256 Binary Integrity
+        run: uv run pytest tests/test_vgmstream_integrity.py -q
+
+      - name: Run pip-audit Vulnerability Scan
+        run: uv run --with pip-audit pip-audit
+
+  test:
+    name: Hermetic Test Suite
+    runs-on: windows-latest
+    needs: [lint, arch-guard, security]
+    env:
+      QT_QPA_PLATFORM: offscreen
+      SDL_AUDIODRIVER: dummy
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.4.2
+        with:
+          python-version: "3.12"
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --all-groups
+
+      - name: Run Pytest Hermetic Suite
+        run: uv run pytest tests -m "not assets" -q --cov=src --cov-report=term-missing

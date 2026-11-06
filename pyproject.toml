@@ -1,0 +1,133 @@
+[project]
+name = "pywarscape-sound"
+version = "0.1.0"
+description = "SoundBank (.bnk) and audio editor for Total War: Attila and Rome II"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.12"
+dependencies = [
+    "av>=17.1.0",
+    "pygame>=2.5.0",
+    "PySide6>=6.6.0",
+]
+
+[tool.uv]
+package = false
+default-groups = ["dev", "test"]
+
+[dependency-groups]
+dev = [
+    { include-group = "lint" },
+    { include-group = "test" },
+    "pre-commit>=4.0.0",
+    "pyinstaller>=6.0.0",
+]
+lint = [
+    "ruff>=0.9.9",
+    "ty>=0.0.1a0",
+]
+test = [
+    "pytest>=9.1.1",
+    "pytest-cov>=6.0.0",
+    "pytest-qt>=4.4.0",
+    "pytest-xdist>=3.5.0",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+extend-exclude = [
+    ".venv",
+    "build",
+    "dist",
+]
+
+[tool.ruff.lint]
+select = [
+    "E", "W",      # pycodestyle
+    "F",           # pyflakes
+    "I",           # isort
+    "UP",          # pyupgrade (modern Python syntax)
+    "B",           # flake8-bugbear
+    "SIM",         # flake8-simplify
+]
+ignore = [
+    "COM812",      # missing-trailing-comma (formatter conflict)
+    "ISC001",      # single-line-implicit-string-concatenation (formatter conflict)
+    "E501",        # line too long (managed by ruff format)
+    "SIM102",      # collapsible-if (nested if can be clearer)
+    "SIM105",      # suppressible-exception (try-except-pass is idiomatic in hot loops)
+    "SIM118",      # in-dict-keys
+    "SIM210",      # if-expr-with-true-false
+    "B905",        # zip-without-explicit-strict
+    "B008",        # function-call-in-default-argument
+    "E402",        # module-import-not-at-top-of-file (deferred imports for circularity)
+    "UP042",       # replace-str-enum (str, Enum is standard across domain models)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"**/__init__.py" = [
+    "F401",        # unused imports allowed in package exports
+]
+"tests/**/*.py" = [
+    "S101",        # assert allowed in tests
+    "PLR2004",     # magic values allowed in tests
+    "F841",        # unused variable in tests
+    "F401",        # unused import in tests
+    "RUF015",      # single element slice
+]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+docstring-code-format = true
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+addopts = [
+    "-ra",
+    "--strict-markers",
+    "--strict-config",
+    "-n",
+    "auto",
+    "-m",
+    "not live",
+]
+markers = [
+    "live: marks tests requiring live game execution",
+    "assets: marks tests requiring external vanilla game cache or mod pack assets",
+]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+]
+
+[tool.coverage.run]
+branch = true
+source = ["src"]
+omit = [
+    "src/ui/features/bank_viewer/__main__.py",
+    "*/__main__.py",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "if __name__ == .__main__.:",
+    "raise NotImplementedError",
+    "@abstractmethod",
+]
+fail_under = 80
+show_missing = true
+
+[tool.ty.terminal]
+error-on-warning = false
+
+[tool.ty.environment]
+python-version = "3.12"
+
+[[tool.ty.overrides]]
+include = ["src/ui/**"]
+[tool.ty.overrides.rules]
+invalid-method-override = "ignore"
