@@ -104,17 +104,17 @@ def test_project_hub_store_uses_portable_path(monkeypatch: pytest.MonkeyPatch, t
     assert store.state.recent_projects[0].name == "PortableMod"
 
 
-def test_zero_path_home_in_v3_production_code():
-    """Static check verifying zero Path.home() calls exist in v3 production code."""
+def test_zero_path_home_in_production_code():
+    """Static check verifying zero Path.home() calls exist in production code."""
     repo_root = Path(__file__).resolve().parents[1]
-    v3_dir = repo_root / "src"
+    src_dir = repo_root / "src"
     violations: list[str] = []
 
-    for py_file in v3_dir.rglob("*.py"):
+    for py_file in src_dir.rglob("*.py"):
         tree = ast.parse(py_file.read_text(encoding="utf-8"), filename=str(py_file))
         for node in ast.walk(tree):
             if isinstance(node, ast.Call):
                 if isinstance(node.func, ast.Attribute) and node.func.attr == "home":
                     violations.append(f"{py_file.relative_to(repo_root)}:{node.lineno}")
 
-    assert not violations, f"Forbidden Path.home() found in v3 production code: {violations}"
+    assert not violations, f"Forbidden Path.home() found in production code: {violations}"

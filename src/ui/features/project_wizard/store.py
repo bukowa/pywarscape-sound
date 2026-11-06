@@ -1,4 +1,4 @@
-"""Headless state store for the Project Wizard feature slice in Audio Editor v3."""
+"""Headless state store for the Project Wizard feature slice."""
 
 from collections.abc import Callable
 from dataclasses import replace

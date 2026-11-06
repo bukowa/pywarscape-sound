@@ -137,7 +137,7 @@ def _parse_tsv_text(text: str) -> list[dict[str, str | None]]:
         if not raw_row:
             continue
         first_cell = raw_row[0].strip()
-        # Skip RPFM metadata header row: #table_name;version;path
+        # Skip TSV metadata header row: #table_name;version;path
         if first_cell.startswith("#"):
             continue
 

@@ -3,7 +3,7 @@ Core mutation engine, graph indexing, and session management (Layer 2).
 Executes two-phase atomic audio mutations with complete Undo/Redo tracking and zero Qt imports.
 - `audio_export.py`: Audio extraction pipeline exporting SoundBank nodes and embedded/streamed WEMs to WAV files (`resolve_node_wav_bytes`, `export_node_to_wav`, `export_nodes_to_directory`).
 - `catalog/causation.py`: Pure state transitions for audio catalog discovery and filtering (`evolve_catalog_state`, `filter_catalog_entries`).
-- `catalog/structs.py`: Immutable data types and algebraic states for catalog exploration (`CatalogScope`, `CatalogState`, `CatalogFilterSpec`).
+- `catalog/structs.py`: Immutable data types and algebraic states for catalog exploration (`CatalogScope`, `CatalogFilterSpec`, and sum-type variants `CatalogUnloaded`, `CatalogLoading`, `CatalogLoaded`, `CatalogError`, `CatalogState`).
 - `catalog_discovery.py`: Discovers and indexes bank and workspace audio assets (`build_audio_catalog_for_bank`).
 - `diff.py`: Computes structural AST differences between active SoundBanks and vanilla baselines (`BankDiffResult`, `diff_soundbanks`).
 - `effectuator.py`: Imperative dispatcher executing `AudioMutationPlan` intents onto disk and bank ASTs (`execute_mutation_plan`).

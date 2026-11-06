@@ -3,46 +3,31 @@ import re
 from pathlib import Path
 
 
-def test_zero_v2_imports_in_v3():
+def test_zero_emoji_icons():
+    """Ensure zero AI slop emojis or decorative pictorial symbols in src, tests, scripts, and .agents."""
     repo_root = Path(__file__).resolve().parents[1]
-    v3_dirs = [repo_root / "src", repo_root / "tests"]
+    scan_dirs = [
+        repo_root / "src",
+        repo_root / "tests",
+        repo_root / "scripts",
+        repo_root / ".agents",
+    ]
     violations = []
 
-    for d in v3_dirs:
-        for py_path in d.rglob("*.py"):
-            lines = py_path.read_text(encoding="utf-8").splitlines()
-            for line_no, line in enumerate(lines, 1):
-                clean = line.strip()
-                if clean.startswith("from v2") or clean.startswith("import v2"):
-                    violations.append(f"{py_path.relative_to(repo_root)}:{line_no}: {clean}")
+    # Matches Unicode emoji pictographs and symbols
+    emoji_pattern = re.compile(r"[\U0001F300-\U0001FAFF]|[\u2600-\u27BF]")
 
-    assert violations == [], "Found v2 imports in v3:\n" + "\n".join(violations)
+    for d in scan_dirs:
+        for file_path in sorted(d.rglob("*")):
+            if not file_path.is_file():
+                continue
+            if file_path.suffix in (".py", ".md", ".yaml", ".yml", ".json", ".txt"):
+                content = file_path.read_text(encoding="utf-8", errors="ignore")
+                matches = emoji_pattern.findall(content)
+                if matches:
+                    violations.append(f"{file_path.relative_to(repo_root)}: {matches}")
 
-
-def test_soundbank_has_no_order_switch_leak():
-    from src.bnk.bank import SoundBank
-
-    assert not hasattr(SoundBank, "find_order_switch_cntr"), (
-        "SoundBank must not contain game-specific find_order_switch_cntr"
-    )
-
-
-def test_zero_emoji_icons_in_src():
-    """Ensure zero AI slop emojis or decorative pictorial symbols in src."""
-    repo_root = Path(__file__).resolve().parents[1]
-    src_dir = repo_root / "src"
-    violations = []
-
-    # Matches Unicode emoji pictographs and symbols (e.g. 🐉, 🤝, 🚀, etc.)
-    emoji_pattern = re.compile(r"[\U0001F300-\U0001FAFF]")
-
-    for py_path in sorted(src_dir.rglob("*.py")):
-        content = py_path.read_text(encoding="utf-8")
-        matches = emoji_pattern.findall(content)
-        if matches:
-            violations.append(f"{py_path.relative_to(repo_root)}: {matches}")
-
-    assert not violations, "Found AI slop emojis in src/:\n" + "\n".join(violations)
+    assert not violations, "Found AI slop emojis:\n" + "\n".join(violations)
 
 
 def test_all_views_no_hardcoded_hex_colors():
@@ -96,7 +81,7 @@ def test_arch_guard_passes_all_src():
 def test_arch_guard_detects_violations(tmp_path: Path):
     from scripts.arch_guard import check_file
 
-    # 1. Bare except in v3
+    # 1. Bare except in src
     f1 = tmp_path / "src" / "engine" / "bad_except.py"
     f1.parent.mkdir(parents=True, exist_ok=True)
     f1.write_text("try:\n    pass\nexcept:\n    pass\n", encoding="utf-8")
@@ -155,7 +140,7 @@ def test_arch_guard_detects_violations(tmp_path: Path):
     errs = check_file(f7, repo_root=tmp_path)
     assert any("Mocking forbidden" in e for e in errs)
 
-    # 8. UI Audio Isolation: dialog/view in v3/ui importing pygame
+    # 8. UI Audio Isolation: dialog/view in src/ui importing pygame
     f8 = tmp_path / "src" / "ui" / "features" / "test" / "dialog.py"
     f8.write_text("import pygame\n", encoding="utf-8")
     errs = check_file(f8, repo_root=tmp_path)

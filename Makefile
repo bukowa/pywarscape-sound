@@ -2,7 +2,7 @@
 
 dev:
 	uv sync --all-groups
-	uv run pre-commit install --install-hooks
+	uv run pre-commit install
 
 lint:
 	uv run ruff check src scripts tests
@@ -20,7 +20,7 @@ test:
 	uv run pytest tests --cov=src --cov-report=term-missing --cov-fail-under=80 -q
 
 test-fast:
-	uv run pytest tests -q
+	uv run pytest tests -m "not assets" -q
 
 test-live:
 	uv run pytest tests/test_live_game.py -m live -q

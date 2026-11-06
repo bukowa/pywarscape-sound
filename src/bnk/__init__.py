@@ -1,4 +1,4 @@
-"""Audiokinetic Wwise v112 (0x70) Binary AST Core (v3)."""
+"""Audiokinetic Wwise v112 (0x70) Binary AST Core."""
 
 from .bank import HircChunk, SoundBank
 from .chunks import (

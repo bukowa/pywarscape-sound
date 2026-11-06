@@ -1,7 +1,5 @@
 """Tests for PySide6 ProjectWizardView data-driven projection widget."""
 
-import ast
-import re
 from pathlib import Path
 from unittest.mock import patch
 
@@ -256,26 +254,3 @@ def test_view_cache_readiness_display(qapp, tmp_path: Path):
     # When cache is valid, status says ready
     store._update_state(is_cache_valid=True)
     assert "ready" in view.lbl_cache_status.text().lower()
-
-
-def test_view_code_cleanliness():
-    """Verify zero v2 imports and zero hardcoded hex colors."""
-    view_path = Path(__file__).parents[1] / "src" / "ui" / "features" / "project_wizard" / "view.py"
-    if not view_path.is_file():
-        pytest.fail("view.py does not exist yet")
-    source = view_path.read_text(encoding="utf-8")
-
-    # Zero v2 imports
-    tree = ast.parse(source, filename=str(view_path))
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            for alias in node.names:
-                assert not alias.name.startswith("v2"), f"Found v2 import: {alias.name}"
-        elif isinstance(node, ast.ImportFrom):
-            if node.module:
-                assert not node.module.startswith("v2"), f"Found v2 import: {node.module}"
-
-    # Zero hardcoded hex colors
-    hex_pattern = re.compile(r"#[0-9a-fA-F]{3,8}\b")
-    matches = hex_pattern.findall(source)
-    assert not matches, f"Found hardcoded hex color literals in view.py: {matches}"

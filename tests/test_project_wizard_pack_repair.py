@@ -1,7 +1,6 @@
 """Tests for Project Wizard integration with Mod Pack Health scanning and repair staging."""
 
 import ast
-import re
 from pathlib import Path
 from unittest.mock import patch
 
@@ -191,23 +190,3 @@ def test_no_qt_imports_in_wizard_state_and_store():
                     assert not node.module.startswith("PyQt"), (
                         f"Qt import {node.module} in {py_file.name}"
                     )
-
-
-def test_view_code_cleanliness():
-    """Verify zero v2 imports and zero hardcoded hex colors in wizard view."""
-    view_path = Path(__file__).parents[1] / "src" / "ui" / "features" / "project_wizard" / "view.py"
-    assert view_path.is_file()
-    source = view_path.read_text(encoding="utf-8")
-
-    tree = ast.parse(source, filename=str(view_path))
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            for alias in node.names:
-                assert not alias.name.startswith("v2"), f"Found v2 import: {alias.name}"
-        elif isinstance(node, ast.ImportFrom):
-            if node.module:
-                assert not node.module.startswith("v2"), f"Found v2 import: {node.module}"
-
-    hex_pattern = re.compile(r"#[0-9a-fA-F]{3,8}\b")
-    matches = hex_pattern.findall(source)
-    assert not matches, f"Found hardcoded hex color literals in view.py: {matches}"

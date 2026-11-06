@@ -200,8 +200,8 @@ python-preference = "managed"
 
 | Project Type | uv.lock in Git? | Why |
 |--------------|-----------------|-----|
-| Application | ✅ Commit | Reproducible deploys |
-| Library | ❌ .gitignore | Users resolve their own deps |
+| Application | Commit | Reproducible deploys |
+| Library | Ignore (.gitignore) | Users resolve their own deps |
 
 ## Common Patterns
 

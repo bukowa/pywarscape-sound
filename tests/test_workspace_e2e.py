@@ -26,7 +26,7 @@ def test_workspace_real_bnk_mutation_and_relocation(tmp_path):
     dir_a = tmp_path / "Project_A"
     project = ProjectStorage.create_project(dir_a, name="PortabilityTest", game=GameType.ATTILA)
 
-    # Parse vanilla bank using v3 AST
+    # Parse vanilla bank using SoundBank AST
     bank = SoundBank.from_bytes(vanilla_battle_path.read_bytes())
     # Save into project
     project.save_bank("battle.bnk", bank.to_bytes())

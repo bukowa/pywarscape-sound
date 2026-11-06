@@ -32,7 +32,6 @@ data/cache_vanilla/
 
 # Local tools
 tools/wwise/
-tools/rpfm/
 !tools/vgmstream/
 !tools/vgmstream/**
 *.bnk
@@ -47,11 +46,6 @@ recent_projects.json
 projects/
 *.log
 logs/
-
-# Archived legacy workspace artifacts
-.old/
-warscape_community_editor/
-.superpowers/
 
 # Local research and documentation
 docs/

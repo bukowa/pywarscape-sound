@@ -109,7 +109,7 @@ def package_zip(app_dir: Path, zip_path: Path) -> Path:
 
 
 def build_standalone(
-    version: str = "1.0.0",
+    version: str = "0.1.0",
     skip_build: bool = False,
     dist_dir: Path = DEFAULT_DIST_DIR,
     build_dir: Path = DEFAULT_BUILD_DIR,
@@ -133,8 +133,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Build and package standalone PyWarscape Sound.")
     parser.add_argument(
         "--version",
-        default="1.0.0",
-        help="Release version string (default: 1.0.0)",
+        default="0.1.0",
+        help="Release version string (default: 0.1.0)",
     )
     parser.add_argument(
         "--skip-build",

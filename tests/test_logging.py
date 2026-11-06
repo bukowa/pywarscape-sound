@@ -1,5 +1,5 @@
 """
-Tests for application-wide logging and crash diagnostics (v3/ui/log.py).
+Tests for application-wide logging and crash diagnostics (src/ui/log.py).
 """
 
 from __future__ import annotations

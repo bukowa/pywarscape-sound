@@ -67,10 +67,10 @@ The user might ask in various ways:
 
 **For Remote Repositories:**
 ```bash
-npx repomix@latest --remote <repo> --output /tmp/<repo-name>-analysis.xml
+npx repomix@latest --remote <repo> --output "$env:TEMP\<repo-name>-analysis.xml"
 ```
 
-**IMPORTANT**: Always output to `/tmp` for remote repositories to avoid polluting the user's current project directory.
+**IMPORTANT**: Always output to `$env:TEMP` for remote repositories to avoid polluting the user's current project directory.
 
 **For Local Directories:**
 ```bash
@@ -87,8 +87,8 @@ npx repomix@latest [directory] [options]
 
 **Command Examples:**
 ```bash
-# Basic remote pack (always use /tmp)
-npx repomix@latest --remote yamadashy/repomix --output /tmp/repomix-analysis.xml
+# Basic remote pack (always use $env:TEMP)
+npx repomix@latest --remote yamadashy/repomix --output "$env:TEMP\repomix-analysis.xml"
 
 # Basic local pack
 npx repomix@latest
@@ -96,8 +96,8 @@ npx repomix@latest
 # Pack specific directory
 npx repomix@latest ./src
 
-# Large repo with compression (use /tmp)
-npx repomix@latest --remote facebook/react --compress --output /tmp/react-analysis.xml
+# Large repo with compression (use $env:TEMP)
+npx repomix@latest --remote facebook/react --compress --output "$env:TEMP\react-analysis.xml"
 
 # Include only specific file types
 npx repomix@latest --include "**/*.{ts,tsx,js,jsx}"
@@ -182,7 +182,7 @@ grep -iE "error|exception|try.*catch" file.xml
 ### File Management
 - Default output: `./repomix-output.xml`
 - Use `--output` flag for custom paths
-- Clean up large files after analysis: `rm repomix-output.xml`
+- Clean up large files after analysis: `Remove-Item repomix-output.xml`
 - Or keep for future reference if space allows
 
 ## Communication Style
@@ -199,9 +199,9 @@ grep -iE "error|exception|try.*catch" file.xml
 User: "Analyze the yamadashy/repomix repository"
 
 Your workflow:
-1. Run: npx repomix@latest --remote yamadashy/repomix --output /tmp/repomix-analysis.xml
+1. Run: npx repomix@latest --remote yamadashy/repomix --output "$env:TEMP\repomix-analysis.xml"
 2. Note the metrics from command output (files, tokens)
-3. Grep: grep -i "export" /tmp/repomix-analysis.xml (find main exports)
+3. Search: Select-String -Path "$env:TEMP\repomix-analysis.xml" -Pattern "export" (find main exports)
 4. Read file tree section to understand structure
 5. Summarize:
    "This repository contains [number] files.
@@ -232,7 +232,7 @@ Your workflow:
 1. Run: npx repomix@latest ./
 2. Read file tree from output (use limit if file is large)
 3. Grep for main entry points: grep -iE "index|main|app" repomix-output.xml
-4. Grep for exports: grep "export" repomix-output.xml | head -20
+4. Search for exports: Select-String -Path repomix-output.xml -Pattern "export" | Select-Object -First 20
 5. Provide structural overview with ASCII diagram if helpful
 ```
 
@@ -241,7 +241,7 @@ Your workflow:
 User: "Analyze facebook/react - it's a large repository"
 
 Your workflow:
-1. Run: npx repomix@latest --remote facebook/react --compress --output /tmp/react-analysis.xml
+1. Run: npx repomix@latest --remote facebook/react --compress --output "$env:TEMP\react-analysis.xml"
 2. Note compression reduced token count (~70% reduction)
 3. Check metrics and file tree
 4. Grep for main components

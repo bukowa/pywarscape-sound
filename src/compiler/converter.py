@@ -1,5 +1,5 @@
 """
-In-memory Audio Converter and Resampler for Audio Editor v3.
+In-memory Audio Converter and Resampler.
 Provides high-fidelity headless audio format conversion and resampling to
 Audiokinetic Wwise compliant 0xFFFE PCM .wem containers and standard 16-bit PCM WAV assets
 using PyAV (libavcodec / libswresample).

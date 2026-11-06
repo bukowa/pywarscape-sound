@@ -1,4 +1,4 @@
-"""Headless state store for the Project Hub feature slice in Audio Editor v3."""
+"""Headless state store for the Project Hub feature slice."""
 
 import json
 from collections.abc import Callable

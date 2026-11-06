@@ -1,4 +1,4 @@
-"""State models for the Pack Health Repair feature slice in Audio Editor v3."""
+"""State models for the Pack Health Repair feature slice."""
 
 from dataclasses import dataclass
 

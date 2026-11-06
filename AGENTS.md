@@ -1,5 +1,5 @@
-# Audio Editor (`v3`)
-Python 3.12+ / PySide6 modding tool for **Total War: Attila** and **Rome II**. Opens `.pack` archives, edits Wwise v112 SoundBanks (`.bnk`) and `.wem` audio with cross-bank Undo/Redo, and compiles Movie `.pack` mods. Pure Python: no Wwise CLI, no RPFM.
+# PyWarscape Sound
+Python 3.12+ / PySide6 modding tool for **Total War: Attila** and **Rome II**. Opens `.pack` archives, edits Wwise v112 SoundBanks (`.bnk`) and `.wem` audio with cross-bank Undo/Redo, and compiles Movie `.pack` mods. Pure Python: no Wwise CLI, no external archive managers.
 
 Every directory has a SPEC.md. Read the target directory's SPEC.md before touching its files.
 
@@ -11,7 +11,7 @@ Always `uv run` (never bare `python`). Never judge correctness by reading code; 
 2. `uv run ruff check --fix src scripts tests` (mandatory auto-fix linter issues)
 3. `uv run ty check src` (type checking)
 4. `uv run scripts/arch_guard.py; uv run pytest tests/test_cleanliness.py -q` (fast architecture & cleanliness)
-5. `uv run pytest tests -m "not assets" -q` (hermetic suite: 840+ tests, 0 skips; omit `-m "not assets"` only when game data is available)
+5. `uv run pytest tests -m "not assets" -q` (hermetic suite: 900+ tests, 0 skips; omit `-m "not assets"` only when game data is available)
 6. `uv run pytest tests/test_live_game.py -m live -q` (live game integration test: verify live pack mounting and engine startup with 0 crashes before committing whenever a live game installation is available; or `uv run python scripts/test_live_game.py`)
 - Run app: `uv run python app.py`
 - If a gate fails unexpectedly: stop and report. Do not loop blindly.
@@ -24,7 +24,7 @@ Always `uv run` (never bare `python`). Never judge correctness by reading code; 
 
 `make dev` does steps 1–2, `make hooks` does step 3.
 
-On every `git commit` the hooks run automatically: `ruff --fix` and `ruff format` over `src scripts tests` (same scope as the Verification Loop, so both agree), `scripts/arch_guard.py`, plus whitespace/EOF/TOML/YAML/merge-conflict/large-file checks. A failing hook aborts the commit: re-stage whatever a fixer rewrote and commit again, or fix the reported error.
+On every `git commit` the hooks run automatically: `ruff --fix` and `ruff format` over `src scripts tests` (same scope as the Verification Loop, so both agree), `ty check src`, `scripts/arch_guard.py`, plus whitespace/EOF/TOML/YAML/merge-conflict/large-file checks. A failing hook aborts the commit: re-stage whatever a fixer rewrote and commit again, or fix the reported error.
 
 `uv run pytest` is **not** part of the hook — tests stay in the Verification Loop. Live game tests must be executed prior to committing whenever a live game install is present.
 
@@ -57,11 +57,11 @@ Two-phase edits so a bank is never half-corrupted:
 
 ### 3. Workspace & Session (`src/workspace/`, `src/engine/session.py`)
 - Project on disk: `project.json`, `pack_root/audio/`, `source_audio/`.
-- `WorkspaceSession`: holds loaded banks, `BankGraphIndex`, transactional Undo/Redo (`undo.py`); each batch snapshots affected bank bytes and staged files.
+- `WorkspaceSession`: holds loaded banks, `BankGraphIndex`, transactional Undo/Redo (`session.py`, `ontology.py`); each batch snapshots affected bank bytes and staged files.
 - `AssetResolver` (`resolver.py`): project overlay (`pack_root/audio/`) -> dependency packs -> read-only vanilla cache (`.cache/<game>/audio/`).
 
 ### 4. UI (`src/ui/`)
-Each feature slice (`project_hub`, `project_wizard`, `bank_viewer`, `audio_sources`, `audio_transport`, `pack_repair`, plus `shell/`) has 4 files:
+Each feature slice (`project_hub`, `project_wizard`, `bank_viewer`, `audio_sources`, `audio_transport`, `pack_repair`, `blast_radius`, plus `shell/`) has 4 files:
 1. `state.py` / `structs.py`: frozen state, events, `*Intent` classes.
 2. `causation.py`: pure `reconcile*` returning `(new_state, intents)`.
 3. `store.py`: runs reducer, executes every `*Intent` against `WorkspaceSession`/services, notifies view.

@@ -1,7 +1,5 @@
 """Tests for PySide6 ProjectHubView data-driven projection."""
 
-import ast
-import re
 from pathlib import Path
 from unittest.mock import patch
 
@@ -205,24 +203,3 @@ def test_view_wizard_launch(qapp, tmp_path: Path):
     assert received_projects[0].manifest.name == "WizardCreatedMod"
     assert len(store.state.recent_projects) == 1
     assert store.state.recent_projects[0].name == "WizardCreatedMod"
-
-
-def test_view_code_cleanliness():
-    """Verify architectural invariants: zero v2 imports, zero hardcoded hex colors."""
-    view_path = Path(__file__).parents[1] / "src" / "ui" / "features" / "project_hub" / "view.py"
-    source = view_path.read_text(encoding="utf-8")
-
-    # Zero v2 imports
-    tree = ast.parse(source, filename=str(view_path))
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            for alias in node.names:
-                assert not alias.name.startswith("v2"), f"Found v2 import: {alias.name}"
-        elif isinstance(node, ast.ImportFrom):
-            if node.module:
-                assert not node.module.startswith("v2"), f"Found v2 import: {node.module}"
-
-    # Zero hardcoded hex colors (e.g. #FFF or #FFFFFF)
-    hex_pattern = re.compile(r"#[0-9a-fA-F]{3,8}\b")
-    matches = hex_pattern.findall(source)
-    assert not matches, f"Found hardcoded hex color literals in view.py: {matches}"

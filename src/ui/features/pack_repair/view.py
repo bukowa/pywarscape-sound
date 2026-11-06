@@ -1,4 +1,4 @@
-"""PySide6 dialog view for the Pack Health Repair feature slice in Audio Editor v3."""
+"""PySide6 dialog view for the Pack Health Repair feature slice."""
 
 from PySide6.QtWidgets import (
     QCheckBox,

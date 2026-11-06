@@ -52,9 +52,9 @@ Layer 2 coordinates two-phase atomic audio mutations, graph indexing, and transa
 |---|---|---|
 | `StageMasterAudioIntent` | Disk | Copies imported source audio (`.wav`) into `source_audio/` |
 | `StageLooseWemIntent` | Disk | Writes transcoded 32kHz mono PCM `.wem` to `pack_root/audio/` |
-| `PromoteToStreamedIntent` | Bank AST | Changes `CAkSound.stream_type` from embedded (0) to streamed (2) |
+| `UpdateSoundNodeIntent` | Bank AST | Changes `CAkSound.stream_type` from embedded (0) to streamed (2) |
 | `CopyMediaBytesIntent` | Disk | Duplicates existing cached WEM bytes to a new isolated ID |
-| `UpdateMusicTrackDurationIntent` | Bank AST | Recalculates `CAkMusicTrack` duration and clip boundaries |
+| `SyncMusicTimelineIntent` | Bank AST | Recalculates `CAkMusicTrack` duration and clip boundaries |
 
 ## Key Concepts and Data Structures
 - `WorkspaceSession`: Manages loaded SoundBanks, active graph indices, and undo/redo stacks (`undo()`, `redo()`, `apply_batch()`).
@@ -83,10 +83,10 @@ Layer 2 coordinates two-phase atomic audio mutations, graph indexing, and transa
 ## Verification Commands
 ```bash
 uv run ruff format src scripts tests
-uv run ruff check --fix v3 scripts tests
+uv run ruff check --fix src scripts tests
 uv run ty check src
-uv run scripts/arch_guard.py; uv run pytest tests/src/test_v3_cleanliness.py -q
-uv run pytest tests/src/test_audio_mutation_planner.py -q
-uv run pytest tests/src/test_mutation_undo.py -q
-uv run pytest tests/src/test_media_replacement.py -q
+uv run scripts/arch_guard.py; uv run pytest tests/test_cleanliness.py -q
+uv run pytest tests/test_audio_mutation_planner.py -q
+uv run pytest tests/test_mutation_undo.py -q
+uv run pytest tests/test_media_replacement.py -q
 ```

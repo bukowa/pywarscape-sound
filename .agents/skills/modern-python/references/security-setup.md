@@ -250,6 +250,4 @@ Copy [templates/dependabot.yml](../templates/dependabot.yml) to `.github/dependa
 
 The 7-day cooldown protects against attackers publishing malicious updates and hoping for quick adoption before detection.
 
-See [dependabot.md](./dependabot.md) for advanced configuration.
-
 See [prek.md](./prek.md) for complete pre-commit hook configuration including security hooks.

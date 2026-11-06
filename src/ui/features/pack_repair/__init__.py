@@ -1,4 +1,4 @@
-"""Pack Health Repair UI feature slice for Audio Editor v3."""
+"""Pack Health Repair UI feature slice."""
 
 from src.ui.features.pack_repair.state import PackRepairState, RepairItemState
 from src.ui.features.pack_repair.store import PackRepairStore

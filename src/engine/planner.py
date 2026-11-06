@@ -1,5 +1,5 @@
 """
-Pure deterministic mutation planner for Audio Editor v3 (Functional Core).
+Pure deterministic mutation planner (Functional Core).
 Calculates and validates atomic AudioMutationPlans without performing disk I/O.
 """
 

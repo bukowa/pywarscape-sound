@@ -322,7 +322,6 @@ Install with: `uv sync --group dev --group test`
 
 ## Read Next
 
-- [migration-checklist.md](./references/migration-checklist.md) - Step-by-step migration cleanup
 - [pyproject.md](./references/pyproject.md) - Complete pyproject.toml reference
 - [uv-commands.md](./references/uv-commands.md) - uv command reference
 - [ruff-config.md](./references/ruff-config.md) - Ruff linting/formatting configuration
@@ -330,4 +329,3 @@ Install with: `uv sync --group dev --group test`
 - [pep723-scripts.md](./references/pep723-scripts.md) - PEP 723 inline script metadata
 - [prek.md](./references/prek.md) - Fast pre-commit hooks with prek
 - [security-setup.md](./references/security-setup.md) - Security hooks and dependency scanning
-- [dependabot.md](./references/dependabot.md) - Automated dependency updates

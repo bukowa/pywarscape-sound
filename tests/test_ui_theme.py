@@ -1,4 +1,4 @@
-"""Tests for centralized v3 UI theme constants and application palette."""
+"""Tests for centralized UI theme constants and application palette."""
 
 from PySide6.QtGui import QPalette
 

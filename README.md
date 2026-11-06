@@ -62,7 +62,7 @@ uv run python app.py
 
 ## Testing & Quality Assurance
 
-Audio Editor includes an automated test suite and architecture enforcement tooling:
+PyWarscape Sound includes an automated test suite and architecture enforcement tooling:
 
 ### 1. Hermetic Test Suite
 Runs all unit, integration, and UI tests using synthetic fixtures. Requires zero game installations or external packs:
@@ -172,7 +172,7 @@ The codebase enforces a 4-layer downward dependency hierarchy (`Layer 4 -> Layer
 
 ```
 src/
-├── bnk/               # Layer 1: Wwise v112 SoundBank AST (BKHD, DIDX, DATA, 18 HIRC types, STID) & WEM headers
+├── bnk/               # Layer 1: Wwise v112 SoundBank AST (BKHD, DIDX, DATA, 20 HIRC types, STID) & WEM headers
 ├── models/            # Layer 1: Total War binary DB table decoders (db/*_tables/*) and AudioMetadataCatalog
 ├── compiler/          # Layer 1/2: PFH4 .pack reader/writer with retail decryption & PyAV in-memory WEM transcoder
 ├── deps/              # Layer 2: Headless audio decoding bridge (vgmstream CLI integration)
@@ -182,7 +182,7 @@ src/
 └── ui/                # Layer 4: Data-driven PySide6 interface (state.py -> causation.py -> store.py -> view.py)
     ├── shell/         # MainWindow, dock layout persistence, and cross-feature WorkspaceCoordinator
     └── features/      # Feature slices: project_hub, project_wizard, bank_viewer, audio_sources,
-                       # audio_transport, pack_repair
+                       # audio_transport, pack_repair, blast_radius
 ```
 
 ---
@@ -194,7 +194,7 @@ PyWarscape Sound is licensed under the [MIT License](LICENSE).
 Third-party dependencies and open-source licenses:
 - **PyAV** (FFmpeg bindings): LGPL v2.1+ / BSD 2-Clause (dynamically linked)
 - **PySide6** (Qt for Python): LGPL v3 (dynamically linked)
-- **pygame-ce**: LGPL v2.1 (dynamically linked)
+- **Pygame**: LGPL v2.1 (dynamically linked)
 - **vgmstream**: ISC License (external subprocess binary)
 - **PFH4 Format Specifications**: Frodo45127 (MIT License - clean-room pure Python container implementation)
 

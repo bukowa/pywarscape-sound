@@ -1,5 +1,5 @@
 """
-Pure-Python Total War PFH4 Pack reader and Mod .pack compiler for v3.
+Pure-Python Total War PFH4 Pack reader and Mod .pack compiler.
 Provides standalone reading of PFH4 archives and generation of PT_MOD (and PT_MOVIE) .pack files.
 """
 

@@ -1,7 +1,7 @@
 # src/workspace
 Mod project workspace lifecycle, storage, and layered asset resolution (Layer 3).
 Coordinates multi-game caches, dependency pack overlays, and sound library scanning without Qt imports.
-- `cache.py`: `GameCache` managing indexed vanilla SoundBanks, `event_data.dat`, loose audio, and audio-related DB table extraction (`_AUDIO_DB_TABLE_DIRS`).
+- `cache.py`: `GameCache` managing indexed vanilla SoundBanks, `event_data.dat`, loose audio, and audio-related DB table extraction.
 - `dependencies.py`: `DependencyManager` handling external `.pack` ingestion, table extraction, and priority conflicts.
 - `game.py`: Game definitions (`GameType`, `GameConfig`, `get_game_config`, `resolve_user_script_path`) for Attila and Rome II.
 - `game_detector.py`: Pure-Python `GameDetector` locating Steam library folders and game installation directories.

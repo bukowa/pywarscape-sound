@@ -1,4 +1,4 @@
-"""SoundBank Viewer feature slice (v3)."""
+"""SoundBank Viewer feature slice."""
 
 from src.ui.features.bank_viewer.state import BankViewerState
 from src.ui.features.bank_viewer.store import BankViewerStore

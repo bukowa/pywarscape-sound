@@ -1,15 +1,15 @@
 ---
 name: test-factories
 description: |
-  Write, maintain, and structure unit, integration, and UI tests under tests/src/. Use when creating test fixtures, synthetic audio files, project factories, or handling game asset dependency markers and skips.
+  Write, maintain, and structure unit, integration, and UI tests under tests/. Use when creating test fixtures, synthetic audio files, project factories, or handling game asset dependency markers and skips.
 
   Trigger for:
-  - Creating or updating tests in tests/src/
-  - Shared fixtures in tests/conftest.py (qapp, test_project, skip_or_fail_missing_asset)
+  - Creating or updating tests in tests/
+  - Shared fixtures in tests/conftest.py (qapp, test_project) and skip helper in tests/support/factories.py (skip_or_fail_missing_asset)
   - Synthetic audio generation or test factories in tests/support/factories.py (make_synthetic_wav, make_audio_project, encode_binary_db_table, write_synthetic_pfh4_pack)
   - Game data and pack asset skips via skip_or_fail_missing_asset or @pytest.mark.assets
   - UI testing with pytest-qt (qtbot, render assertions, headless offscreen setup)
-  - Architecture and cleanliness test maintenance (tests/src/test_v3_cleanliness.py)
+  - Architecture and cleanliness test maintenance (tests/test_cleanliness.py)
 
   DO NOT trigger for:
   - Modifying production UI widgets or theme tokens (use feature-slice skill)
@@ -18,14 +18,14 @@ description: |
   - Running live game startup integration tests with Attila.exe (@pytest.mark.live)
 ---
 
-# Test Fixtures & Factories (`tests/v3` and `tests/support`)
+# Test Fixtures & Factories (`tests/` and `tests/support`)
 
 Guidance for authoring and maintaining fast, hermetic, and deterministic tests across unit, integration, and UI feature slices.
 
 ## Read-First Files
 - `tests/conftest.py`: Root pytest fixtures (`qapp`, `test_project`), audio driver muting, and headless environment variables.
 - `tests/support/factories.py`: Synthetic audio generators (`make_synthetic_wav`) and test project builders (`make_audio_project`).
-- `tests/src/test_v3_cleanliness.py`: Enforces architectural cleanliness and structure.
+- `tests/test_cleanliness.py`: Enforces architectural cleanliness and structure.
 - `scripts/arch_guard.py`: Static AST rules for forbidden test imports and fixture duplications.
 
 ## Shared Test Fixtures and Builders
@@ -103,13 +103,13 @@ def test_component_with_synthetic_cache(tmp_path: Path):
 ```
 
 ## Invariants
-1. **No Duplicate `qapp` Fixture:** Never define `def qapp(` inside `tests/src/*.py`. The shared session fixture in `tests/conftest.py` must be used. (Enforced by `scripts/arch_guard.py`).
+1. **No Duplicate `qapp` Fixture:** Never define `def qapp(` inside `tests/*.py`. The shared session fixture in `tests/conftest.py` must be used. (Enforced by `scripts/arch_guard.py`).
 2. **No `QT_QPA_PLATFORM` in Tests:** Never set or modify `os.environ["QT_QPA_PLATFORM"]` in test files. It is configured globally in `tests/conftest.py`.
 3. **No `PYTEST_CURRENT_TEST` in Production:** Never read or branch on `PYTEST_CURRENT_TEST` inside `src/` production code. Production code must remain test-agnostic.
 4. **Mandatory `@pytest.mark.assets` on External Asset Tests:** Any test that requires `.cache/` or `.pack` files must be decorated with `@pytest.mark.assets` and use `skip_or_fail_missing_asset(reason)` instead of raw `pytest.skip`.
 5. **Synchronous Coordinator Testing:** Pass `async_preview=False` explicitly when instantiating `WorkspaceCoordinator` in unit tests to avoid unhandled background threads.
 6. **No Mocking in Causation Tests:** Causation and table tests must be pure and never import `unittest.mock` or `mock`.
-7. **Live Game Testing Rule Before Commit:** Run live game integration tests (`uv run pytest tests/src/test_live_game.py -m live -q` or `uv run python scripts/test_live_game.py`) before committing whenever a live game installation is detected.
+7. **Live Game Testing Rule Before Commit:** Run live game integration tests (`uv run pytest tests/test_live_game.py -m live -q` or `uv run python scripts/test_live_game.py`) before committing whenever a live game installation is detected.
 
 ## Step-by-Step Checklist
 1. **Choose Strategy:** Decide whether the test is hermetic (synthetic) or asset-dependent:
@@ -128,9 +128,9 @@ def test_component_with_synthetic_cache(tmp_path: Path):
 ## Verification Commands
 ```bash
 uv run ruff format src scripts tests
-uv run ruff check --fix v3 scripts tests
+uv run ruff check --fix src scripts tests
 uv run ty check src
-uv run scripts/arch_guard.py; uv run pytest tests/src/test_v3_cleanliness.py -q
-uv run pytest tests/v3 -m "not assets" -q  # Hermetic suite (840+ tests, 0 skips)
-uv run pytest tests/src/test_live_game.py -m live -q  # Live game integration test (mandatory before commit if game installed)
+uv run scripts/arch_guard.py; uv run pytest tests/test_cleanliness.py -q
+uv run pytest tests -m "not assets" -q  # Hermetic suite (900+ tests, 0 skips)
+uv run pytest tests/test_live_game.py -m live -q  # Live game integration test (mandatory before commit if game installed)
 ```

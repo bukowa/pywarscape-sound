@@ -1,4 +1,4 @@
-"""Offscreen headless tests for v3 MainWindow shell."""
+"""Offscreen headless tests for MainWindow shell."""
 
 from pathlib import Path
 

@@ -29,7 +29,7 @@ def get_app_root() -> Path:
     if getattr(sys, "frozen", False):
         return Path(sys.executable).resolve().parent
 
-    # Development source tree: v3/workspace/paths.py -> parents[2] is repo root
+    # Development source tree: src/workspace/paths.py -> parents[2] is repo root
     repo_root = Path(__file__).resolve().parents[2]
     return repo_root
 

@@ -1,6 +1,7 @@
 # src/ui/features/bank_viewer
 SoundBank exploration and HIRC hierarchy inspection feature slice.
 Provides full AST visualization, navigation history, property inspection, and direct node audio replacement.
+- `__main__.py`: Standalone developer harness and CLI runner for previewing the SoundBank Viewer.
 - `audio_resolver.py`: Resolves playable `AudioTrack` items from SoundBank HIRC nodes and embedded DIDX entries.
 - `bank_list_panel.py`: `BankListPanel` displaying available vanilla and modified project SoundBanks.
 - `builder.py`: Projections mapping SoundBank AST and graph index into `HircTreeNode` hierarchies and property sheets.

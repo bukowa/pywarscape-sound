@@ -1,5 +1,5 @@
 """
-Compiler package for v3 audio pipeline and SoundBank builds.
+Compiler package for audio pipeline and SoundBank builds.
 """
 
 from src.compiler.audio_modifiers import (

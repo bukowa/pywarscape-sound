@@ -81,6 +81,10 @@ def check_file(path: Path, repo_root: Path | None = None) -> list[str]:
     is_in_src_engine = is_in_src and (
         "/engine/" in f"/{rel_path}/" or rel_path.startswith("src/engine/")
     )
+    is_in_src_compiler = is_in_src and (
+        "/compiler/" in f"/{rel_path}/" or rel_path.startswith("src/compiler/")
+    )
+    is_in_src_deps = is_in_src and ("/deps/" in f"/{rel_path}/" or rel_path.startswith("src/deps/"))
     is_in_src_ui = is_in_src and ("/ui/" in f"/{rel_path}/" or rel_path.startswith("src/ui/"))
 
     stem_lower = path.stem.lower()
@@ -186,15 +190,15 @@ def check_file(path: Path, repo_root: Path | None = None) -> list[str]:
                 if imp == "src.engine" or imp.startswith("src.engine."):
                     errors.append(f"{path}:{lineno}: Forbidden engine import in workspace: {imp}")
 
-            # src/workspace/ and src/engine/ cannot import src.ui or PySide/PyQt
-            if is_in_src_workspace or is_in_src_engine:
+            # src/workspace/, src/engine/, src/compiler/, and src/deps/ cannot import src.ui or PySide/PyQt
+            if is_in_src_workspace or is_in_src_engine or is_in_src_compiler or is_in_src_deps:
                 if imp == "src.ui" or imp.startswith("src.ui."):
                     errors.append(
-                        f"{path}:{lineno}: Forbidden UI layer import in workspace/engine: {imp}"
+                        f"{path}:{lineno}: Forbidden UI layer import in workspace/engine/compiler/deps: {imp}"
                     )
                 if imp.startswith(("PySide", "PyQt")):
                     errors.append(
-                        f"{path}:{lineno}: Forbidden Qt import in workspace/engine: {imp}"
+                        f"{path}:{lineno}: Forbidden Qt import in workspace/engine/compiler/deps: {imp}"
                     )
 
             # Headless UI files cannot import PySide/PyQt
@@ -277,10 +281,10 @@ def check_file(path: Path, repo_root: Path | None = None) -> list[str]:
         # f. No Cross-Module Private Imports in src/
         # -----------------------------------------------------------------
         if is_in_src and isinstance(node, ast.ImportFrom):
-            is_v3_import = (
-                node.module and (node.module == "v3" or node.module.startswith("src."))
+            is_src_import = (
+                node.module and (node.module == "src" or node.module.startswith("src."))
             ) or node.level > 0
-            if is_v3_import:
+            if is_src_import:
                 for alias in node.names:
                     if alias.name.startswith("_") and not (
                         alias.name.startswith("__") and alias.name.endswith("__")

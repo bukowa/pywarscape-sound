@@ -1,4 +1,4 @@
-"""PySide6 Project Hub view projection for Audio Editor v3."""
+"""PySide6 Project Hub view projection."""
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (

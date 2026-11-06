@@ -1,4 +1,4 @@
-"""Headless state store for the Pack Health Repair feature slice in Audio Editor v3."""
+"""Headless state store for the Pack Health Repair feature slice."""
 
 from collections.abc import Callable
 from dataclasses import replace

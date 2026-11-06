@@ -1,4 +1,4 @@
-"""Table-driven state transition proofs for v3 Application Shell causation."""
+"""Table-driven state transition proofs for Application Shell causation."""
 
 from dataclasses import dataclass
 from pathlib import Path

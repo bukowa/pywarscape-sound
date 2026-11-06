@@ -1,4 +1,4 @@
-"""State models for the Project Hub feature slice in Audio Editor v3."""
+"""State models for the Project Hub feature slice."""
 
 from dataclasses import dataclass
 

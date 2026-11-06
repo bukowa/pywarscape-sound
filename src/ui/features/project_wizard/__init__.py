@@ -1,4 +1,4 @@
-"""Project Wizard feature slice for Audio Editor v3."""
+"""Project Wizard feature slice."""
 
 from src.ui.features.project_wizard.state import ModPackEntry, ProjectWizardState, WizardStep
 from src.ui.features.project_wizard.store import ProjectWizardStore

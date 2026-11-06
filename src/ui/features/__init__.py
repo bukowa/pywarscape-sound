@@ -1,1 +1,1 @@
-"""UI Feature slices for Audio Editor v3."""
+"""UI Feature slices."""

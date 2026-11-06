@@ -95,8 +95,8 @@ class FeatureStore:
 ## Verification Commands
 ```bash
 uv run ruff format src scripts tests
-uv run ruff check --fix v3 scripts tests
+uv run ruff check --fix src scripts tests
 uv run ty check src
-uv run scripts/arch_guard.py; uv run pytest tests/src/test_v3_cleanliness.py -q
-uv run pytest tests/src/ -k "causation" -q
+uv run scripts/arch_guard.py; uv run pytest tests/test_cleanliness.py -q
+uv run pytest tests/ -k "causation" -q
 ```

@@ -1,4 +1,4 @@
-"""Tests for the Pack Health Repair Dialog view in Audio Editor v3."""
+"""Tests for the Pack Health Repair Dialog view."""
 
 import pytest
 from PySide6.QtWidgets import QCheckBox, QDialog, QLabel

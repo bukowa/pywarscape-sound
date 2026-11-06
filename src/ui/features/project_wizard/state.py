@@ -1,4 +1,4 @@
-"""State models for the Project Wizard feature slice in Audio Editor v3."""
+"""State models for the Project Wizard feature slice."""
 
 from dataclasses import dataclass
 from enum import Enum

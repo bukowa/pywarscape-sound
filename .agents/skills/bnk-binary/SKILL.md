@@ -42,12 +42,12 @@ Layer 1 handles bit-exact parsing, typed AST representation, and serialization o
 - `DATA`: Contiguous raw binary slice holding the concatenated embedded `.wem` audio streams referenced by DIDX.
 - `HIRC`: Hierarchy chunk starting with a 32-bit object count, followed by variable-length HIRC object records.
 - `STID`: String mapping chunk associating SoundBank numeric IDs with human-readable string bank names.
-- `scan_didx_media_ids(bnk_bytes: bytes) -> set[int]`: Scans DIDX chunks directly without full AST parsing.
+- `scan_didx_media_ids(path: Path | str) -> frozenset[int]`: Scans DIDX chunks directly without full AST parsing.
 
 ## Supported HIRC Object Types (`src/bnk/models.py`)
 | Type ID | Class Name | Description |
 |---|---|---|
-| `0x01` | `CAkSettings` | Bank-wide audio settings and property baselines |
+| `0x01` | `CAkState` | State property definitions and parameter values |
 | `0x02` | `CAkSound` | Audio playback leaf referencing embedded or streamed WEM |
 | `0x03` | `CAkAction` | Action triggered by events (Play, Stop, Pause, Set State) |
 | `0x04` | `CAkEvent` | Event entity grouping executable action IDs |
@@ -85,9 +85,9 @@ Layer 1 handles bit-exact parsing, typed AST representation, and serialization o
 ## Verification Commands
 ```bash
 uv run ruff format src scripts tests
-uv run ruff check --fix v3 scripts tests
+uv run ruff check --fix src scripts tests
 uv run ty check src
-uv run scripts/arch_guard.py; uv run pytest tests/src/test_v3_cleanliness.py -q
-uv run pytest tests/src/test_hirc_objects.py -q
-uv run pytest tests/src/test_v3_bnk_roundtrip.py -q
+uv run scripts/arch_guard.py; uv run pytest tests/test_cleanliness.py -q
+uv run pytest tests/test_hirc_objects.py -q
+uv run pytest tests/test_bnk_roundtrip.py -q
 ```

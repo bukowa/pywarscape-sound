@@ -1,5 +1,5 @@
 """
-Audiokinetic Wwise .wem Audio Container Parser and Generator for v3.
+Audiokinetic Wwise .wem Audio Container Parser and Generator.
 Provides pure binary inspection and validation of RIFF/WAVE, Wwise Vorbis, and PCM headers,
 plus conversion of WAV / raw PCM into compliant 0xFFFE PCM .wem containers.
 """

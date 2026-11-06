@@ -1,4 +1,4 @@
-"""Audio Sources feature slice (v3)."""
+"""Audio Sources feature slice."""
 
 from src.ui.features.audio_sources.state import (
     ApplyMode,

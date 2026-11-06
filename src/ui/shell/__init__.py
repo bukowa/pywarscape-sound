@@ -1,4 +1,4 @@
-"""Application Shell package for Audio Editor v3."""
+"""Application Shell package."""
 
 from src.ui.shell.coordinator import WorkspaceCoordinator
 from src.ui.shell.state import ScreenMode, ShellState

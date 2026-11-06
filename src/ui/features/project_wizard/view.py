@@ -1,4 +1,4 @@
-"""PySide6 Project Wizard view projection for Audio Editor v3."""
+"""PySide6 Project Wizard view projection."""
 
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (

@@ -1,4 +1,4 @@
-"""Pure immutable data ontology for the SoundBank Viewer feature slice (v3)."""
+"""Pure immutable data ontology for the SoundBank Viewer feature slice."""
 
 from collections.abc import Mapping
 from dataclasses import dataclass

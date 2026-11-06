@@ -1,4 +1,4 @@
-"""Pure immutable data ontology for the v3 Application Shell."""
+"""Pure immutable data ontology for the Application Shell."""
 
 from dataclasses import dataclass
 from enum import Enum

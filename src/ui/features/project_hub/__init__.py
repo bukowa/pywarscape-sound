@@ -1,4 +1,4 @@
-"""Project Hub feature slice for Audio Editor v3."""
+"""Project Hub feature slice."""
 
 from src.ui.features.project_hub.state import ProjectHubState, RecentProjectItem
 from src.ui.features.project_hub.store import ProjectHubStore
