@@ -139,6 +139,7 @@ def test_view_browse_game_button(qapp, tmp_path: Path):
 def test_view_build_cache_button_click(qapp, tmp_path: Path):
     """Verify clicking build cache button triggers store.build_cache."""
     store = ProjectHubStore(cache_file=tmp_path / "recent.json")
+    store._update_state(is_game_path_valid=True)
     view = ProjectHubView(store)
 
     with patch.object(store, "build_cache") as mock_build:

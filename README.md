@@ -1,5 +1,7 @@
 # PyWarscape Sound
 
+![PyWarscape Sound](.github/image.png)
+
 PyWarscape Sound is a standalone desktop application for inspecting, modifying, and packaging Audiokinetic Wwise SoundBanks (`.bnk`) and `.wem` audio files for **Total War: Attila** and **Total War: Rome II**.
 
 It operates natively in Python with zero external tool dependencies: no Wwise authoring application, no external archive managers, and no external audio converters required.
