@@ -59,6 +59,7 @@ def test_e2e_project_wizard_onboarding_to_workspace(qapp, qtbot, tmp_path: Path,
        with project manifest, directory layout, and menu actions enabled.
     """
     monkeypatch.setenv("APPDATA", str(tmp_path / "FakeAppData"))
+    monkeypatch.setattr("src.workspace.cache.GameCache.is_valid", lambda self: True)
 
     # 1. Setup synthetic game cache
     cache_dir = tmp_path / "cache" / "audio"
@@ -122,6 +123,7 @@ def test_e2e_first_time_pack_build_modal_flow(qapp, qtbot, tmp_path: Path, monke
        and MainWindow status bar displays compilation feedback.
     """
     monkeypatch.setenv("APPDATA", str(tmp_path / "FakeAppData"))
+    monkeypatch.setattr("src.workspace.cache.GameCache.is_valid", lambda self: True)
 
     # 1. Setup project with modified bank and unset output_pack_path
     proj_dir = tmp_path / "FirstBuildMod"
@@ -181,6 +183,7 @@ def test_e2e_dependency_dialog_live_hot_reload(qapp, qtbot, tmp_path: Path, monk
     5. MainWindow's BankViewerView table immediately displays the new bank.
     """
     monkeypatch.setenv("APPDATA", str(tmp_path / "FakeAppData"))
+    monkeypatch.setattr("src.workspace.cache.GameCache.is_valid", lambda self: True)
 
     # 1. Setup vanilla cache
     cache_dir = tmp_path / "cache" / "audio"
@@ -253,6 +256,7 @@ def test_e2e_recent_projects_double_click_roundtrip(qapp, qtbot, tmp_path: Path,
     5. Double-clicking recent list item re-opens Project Alpha and transitions to Workspace.
     """
     monkeypatch.setenv("APPDATA", str(tmp_path / "FakeAppData"))
+    monkeypatch.setattr("src.workspace.cache.GameCache.is_valid", lambda self: True)
 
     cache_dir = tmp_path / "cache" / "audio"
     cache_dir.mkdir(parents=True)
@@ -303,6 +307,7 @@ def test_e2e_spacebar_playback_and_line_edit_focus_guard(qapp, qtbot, tmp_path: 
        without toggling the audio transport.
     """
     monkeypatch.setenv("APPDATA", str(tmp_path / "FakeAppData"))
+    monkeypatch.setattr("src.workspace.cache.GameCache.is_valid", lambda self: True)
 
     wav_path = make_synthetic_wav(tmp_path / "audition.wav")
     wav_bytes = wav_path.read_bytes()
