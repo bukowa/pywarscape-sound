@@ -74,7 +74,7 @@ class LibrariesTableWidget(QWidget):
 
         btn_row = QHBoxLayout()
         btn_row.setSpacing(6)
-        self.btn_add = QPushButton("Add...")
+        self.btn_add = QPushButton("Add Folder...")
         self.btn_add.setStyleSheet(BTN_STYLE_SECONDARY)
         btn_row.addWidget(self.btn_add)
 

@@ -31,6 +31,7 @@ def test_audio_sources_view_render_and_signal_blocking(qtbot, tmp_path: Path):
     # Assert initial state renders target summary
     assert "No target selected" in view.lbl_target_summary.text()
     assert not view.btn_apply.isEnabled()
+    assert view.libraries_widget.btn_add.text() == "Add Folder..."
 
     # Set targets
     target = SoundNodeTarget(bank_name="battle.bnk", sound_id=101)
