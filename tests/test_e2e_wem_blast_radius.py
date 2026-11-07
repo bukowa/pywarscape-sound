@@ -31,6 +31,7 @@ from src.engine.graph import BankGraphIndex
 from src.engine.ontology import (
     BatchItem,
     ExternalFileSource,
+    MusicTrackTarget,
     MutationBatch,
     SoundNodeTarget,
     StageMasterAudioIntent,
@@ -1316,3 +1317,67 @@ def test_tier4_scenario_global_sword_impact_overwrite_workflow(
     for b_name, s_id in [("infantry.bnk", 101), ("cavalry.bnk", 201), ("missile.bnk", 301)]:
         b = session.get_loaded_entry(b_name)[0]
         assert next(o for o in b.hirc.objects if o.id == s_id).stream_type == 0
+
+
+@pytest.mark.skipif(not HAS_M3, reason="Pending M3: Blast Radius UI")
+def test_music_track_blast_radius_branching(qapp, qtbot, monkeypatch, tmp_path: Path):
+    """
+    Verifies check_replacement_branch with MusicTrackTarget:
+    - Branch A for unshared streamed track source (returns OVERWRITE directly).
+    - Branch C for track source sharing WEM with another track (shows BlastRadiusDialog).
+    """
+    from src.engine.ontology import ReplacementScope
+    from src.ui.features.blast_radius.state import BlastRadiusAction
+    from src.ui.features.blast_radius.store import check_replacement_branch
+    from src.ui.features.blast_radius.view import BlastRadiusDialog
+
+    # Bank 1: Track 501 with unshared streamed WEM 11111, Track 502 with shared WEM 22222
+    t1 = CAkMusicTrack(
+        id=501,
+        sources=[
+            AkMusicTrackSource(plugin_id=0x00040001, stream_type=2, source_id=11111, file_id=11111)
+        ],
+    )
+    t2 = CAkMusicTrack(
+        id=502,
+        sources=[
+            AkMusicTrackSource(plugin_id=0x00040001, stream_type=2, source_id=22222, file_id=22222)
+        ],
+    )
+    bank_a = SoundBank(
+        header=BkhdChunk(bank_id=901, version=112),
+        hirc=HircChunk(objects=[t1, t2]),
+    )
+
+    # Bank 2: Track 601 also referencing shared WEM 22222
+    t3 = CAkMusicTrack(
+        id=601,
+        sources=[
+            AkMusicTrackSource(plugin_id=0x00040001, stream_type=2, source_id=22222, file_id=22222)
+        ],
+    )
+    bank_b = SoundBank(
+        header=BkhdChunk(bank_id=902, version=112),
+        hirc=HircChunk(objects=[t3]),
+    )
+
+    _, session = _setup_test_project_and_session(
+        tmp_path, {"track_a.bnk": bank_a, "track_b.bnk": bank_b}
+    )
+
+    # Test 1: Track 501 (unshared streamed) -> Branch A (no dialog, returns OVERWRITE)
+    target_unshared = MusicTrackTarget(bank_name="track_a.bnk", track_id=501, source_index=0)
+    proceed, scope = check_replacement_branch(
+        session=session, bank_name="track_a.bnk", sound_id=target_unshared
+    )
+    assert proceed is True
+    assert scope == ReplacementScope.OVERWRITE
+
+    # Test 2: Track 502 (shared WEM 22222 across bank_a and bank_b) -> Branch C (dialog shown)
+    monkeypatch.setattr(BlastRadiusDialog, "exec", lambda self: BlastRadiusAction.ISOLATE)
+    target_shared = MusicTrackTarget(bank_name="track_a.bnk", track_id=502, source_index=0)
+    proceed, scope = check_replacement_branch(
+        session=session, bank_name="track_a.bnk", sound_id=target_shared
+    )
+    assert proceed is True
+    assert scope == ReplacementScope.ISOLATE

@@ -6,6 +6,8 @@ Wwise v112 sound pipeline architecture for Total War: Attila and Rome II.
 
 from typing import Final
 
+from src.bnk.database import fnv1_32
+
 # Master Battle VO Events
 MASTER_EVENT_PLAY_BATTLE_VO_ORDERS: Final[int] = 1391812361  # Play_Battle_VO_Orders
 
@@ -39,8 +41,74 @@ RTPC_INTERFACE_VOLUME: Final[int] = 3274368607  # interface_volume
 RTPC_VOICE_CHAT_VOLUME: Final[int] = 2492104443  # voice_chat_volume
 RTPC_NUM_ENTITIES: Final[int] = 2233671539  # num_entities
 
-# Known Audiokinetic Wwise engine hash mappings
-KNOWN_HASH_NAMES: Final[dict[int, str]] = {
+# Seed strings for dynamic hash mapping of interactive music and switch metadata
+_MUSIC_SWITCH_GROUPS: Final[tuple[str, ...]] = (
+    "frontend_state",
+    "battle_intensity",
+    "game_mode",
+    "music_key",
+    "battle_state",
+    "Music_Dynamic",
+    "music_culture",
+    "campaign_music_state",
+    "battle_result_state",
+    "music_tension",
+)
+
+_DECISION_TREE_BRANCH_KEYS: Final[tuple[str, ...]] = (
+    "credits",
+    "marching",
+    "battle",
+    "campaign",
+    "loading_screen_end",
+    "front_end",
+    "G",
+    "E",
+    "Bb",
+    "postbattle",
+    "BattleMusic_RoutingEnemy",
+    "BattleMusic_ProjectileBarrage",
+    "BattleMusic_BigCombat",
+    "BattleMusic_ChargeCavalry",
+    "BattleMusic_GeneralDeadAllied",
+    "BattleMusic_ChargeInfantry",
+    "BattleMusic_SiegeDefenceAttacked",
+    "BattleMusic_GeneralDeadEnemy",
+    "BattleMusic_1_FullMix",
+    "BattleMusic_ChasingDown",
+    "BattleMusic_RoutingAllied",
+    "barbarian",
+    "roman",
+    "arabic",
+    "hunnic",
+    "prebattle",
+    "standard",
+    "lose",
+    "draw",
+    "tension",
+    "none",
+)
+
+_MUSIC_CUES: Final[tuple[str, ...]] = (
+    "Out",
+    "In",
+    "To_Normal",
+    "Exit to Battle",
+    "Entry_from_Marching",
+    "Exit_Track_Change_States",
+    "Tension_Code_Trigger",
+    "March_Transition_Out",
+    "Enter_Track_Enable_Dynamic_States",
+    "Exit_Track_Disable_Dynamic_States",
+)
+
+_SEED_STRINGS: Final[tuple[str, ...]] = (
+    *_MUSIC_SWITCH_GROUPS,
+    *_DECISION_TREE_BRANCH_KEYS,
+    *_MUSIC_CUES,
+)
+
+_BASE_KNOWN_HASH_NAMES: Final[dict[int, str]] = {
     MASTER_EVENT_PLAY_BATTLE_VO_ORDERS: "Play_Battle_VO_Orders",
     SWITCH_GROUP_VO_ORDER: "VO_ORDER",
     SWITCH_GROUP_VO_CULTURE: "VO_CULTURE",
@@ -66,4 +134,10 @@ KNOWN_HASH_NAMES: Final[dict[int, str]] = {
     RTPC_INTERFACE_VOLUME: "interface_volume",
     RTPC_VOICE_CHAT_VOLUME: "voice_chat_volume",
     RTPC_NUM_ENTITIES: "num_entities",
+}
+
+# Known Audiokinetic Wwise engine hash mappings (100% decision tree & cue hash resolution)
+KNOWN_HASH_NAMES: Final[dict[int, str]] = {
+    **_BASE_KNOWN_HASH_NAMES,
+    **{fnv1_32(s): s for s in _SEED_STRINGS},
 }

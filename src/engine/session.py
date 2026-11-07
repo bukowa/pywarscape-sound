@@ -40,10 +40,18 @@ from src.engine.ontology import (
     SoundNodeTarget,
     StageLooseWemIntent,
     StageMasterAudioIntent,
+    SyncMusicTimelineIntent,
+    UpdateMusicTrackNodeIntent,
     UpdateSoundNodeIntent,
     WemReference,
 )
-from src.engine.planner import plan_batch
+from src.engine.planner import (
+    collect_bank_wem_ids,
+    find_music_track_in_bank,
+    find_parent_segment_in_bank,
+    find_sound_in_bank,
+    plan_batch,
+)
 from src.engine.ports import AssetResolverPort, AudioProjectPort
 
 logger = logging.getLogger(__name__)
@@ -54,6 +62,12 @@ __all__ = ["BatchOutcome", "WorkspaceSession"]
 def _node_key_for_target(target: Any) -> str:
     if isinstance(target, SoundNodeTarget):
         return f"hirc:{target.sound_id}"
+    elif isinstance(target, MusicTrackTarget):
+        return (
+            f"hirc:{target.track_id}:src:{target.source_index}"
+            if target.source_index > 0
+            else f"hirc:{target.track_id}"
+        )
     elif isinstance(target, MediaNodeTarget):
         return f"media:{target.wem_id}"
     return (getattr(target, "sound_id", None) and f"hirc:{target.sound_id}") or ""
@@ -487,6 +501,29 @@ class WorkspaceSession:
         """Returns total number of referencing nodes for wem_id across loaded SoundBanks."""
         return len(self.get_cross_bank_wem_references(wem_id))
 
+    def _collect_reserved_wem_ids(self) -> set[int]:
+        """Collects all known WEM IDs across all loaded banks and staged files."""
+        reserved: set[int] = set()
+        for _, entry in self._loaded_banks.items():
+            bank, graph_index, _ = entry
+            reserved.update(graph_index.wem_references.keys())
+            reserved.update(collect_bank_wem_ids(bank))
+        if self._project is not None:
+            list_fn = getattr(self._project, "list_staged_wems", None)
+            if callable(list_fn):
+                try:
+                    wems = list_fn()
+                    if isinstance(wems, (set, list, tuple)):
+                        reserved.update(wems)
+                except Exception:
+                    logger.debug("Failed to list staged wems from project", exc_info=True)
+            manifest = getattr(self._project, "manifest", None)
+            if manifest is not None and hasattr(manifest, "staged_wems"):
+                staged = getattr(manifest, "staged_wems", ())
+                if isinstance(staged, (set, list, tuple)):
+                    reserved.update(staged)
+        return reserved
+
     def preview_batch(self, batch: MutationBatch) -> BatchPlan:
         """Plans a batch of audio mutations without performing disk I/O or AST mutations."""
         banks: dict[str, SoundBank] = {}
@@ -509,7 +546,11 @@ class WorkspaceSession:
                         OSError,
                     ):
                         pass
-        return plan_batch(banks=banks, batch=batch)
+        return plan_batch(
+            banks=banks,
+            batch=batch,
+            reserved_wem_ids=self._collect_reserved_wem_ids(),
+        )
 
     def _preload_batch_banks(self, batch: MutationBatch) -> dict[str, SoundBank]:
         """Preloads and parses all SoundBanks targeted by items in a mutation batch."""
@@ -541,7 +582,7 @@ class WorkspaceSession:
         batch_plan: BatchPlan,
         banks: dict[str, SoundBank],
     ) -> list[AudioMutationPlan]:
-        """Finds cross-bank sibling sound nodes referencing overwritten WEMs to promote to streamed."""
+        """Finds cross-bank sibling sound and music track nodes referencing overwritten WEMs to promote to streamed."""
         sibling_plans: list[AudioMutationPlan] = []
         for item, plan in zip(batch.items, batch_plan.plans):
             if item.scope == ReplacementScope.OVERWRITE:
@@ -552,42 +593,139 @@ class WorkspaceSession:
                     elif isinstance(eff, CopyMediaBytesIntent):
                         target_wems.add(eff.target_wem_id)
 
+                # Cross-bank promotion: when MediaNodeTarget is on a *_data.bnk, try loading companion logic bank
+                b_lower = item.target.bank_name.lower()
+                companion_name: str | None = None
+                if b_lower.endswith("_data.bnk"):
+                    companion_name = item.target.bank_name[:-9] + ".bnk"
+                elif b_lower.endswith("_data"):
+                    companion_name = item.target.bank_name[:-5] + ".bnk"
+
+                if companion_name is not None and self.get_loaded_entry(companion_name) is None:
+                    try:
+                        self.resolve_and_parse_bank(companion_name)
+                    except (
+                        FileNotFoundError,
+                        ValueError,
+                        KeyError,
+                        IndexError,
+                        RuntimeError,
+                        OSError,
+                    ):
+                        pass
+
                 for wid in target_wems:
                     cross_refs = self.get_cross_bank_wem_references(wid)
                     for ref in cross_refs:
-                        if (
-                            ref.is_embedded
-                            and ref.bank_name.lower() != item.target.bank_name.lower()
-                        ):
+                        if ref.bank_name.lower() != item.target.bank_name.lower():
                             already_targeted = any(
                                 p.target.bank_name.lower() == ref.bank_name.lower()
-                                and getattr(p.target, "sound_id", None) == ref.node_id
+                                and (
+                                    getattr(p.target, "sound_id", None) == ref.node_id
+                                    or getattr(p.target, "track_id", None) == ref.node_id
+                                )
                                 for p in batch_plan.plans
+                            ) or any(
+                                p.target.bank_name.lower() == ref.bank_name.lower()
+                                and (
+                                    getattr(p.target, "sound_id", None) == ref.node_id
+                                    or getattr(p.target, "track_id", None) == ref.node_id
+                                )
+                                for p in sibling_plans
                             )
                             if not already_targeted:
                                 loaded_entry = self.get_loaded_entry(ref.bank_name)
                                 if loaded_entry is not None:
-                                    if ref.bank_name not in banks:
-                                        banks[ref.bank_name] = loaded_entry[0]
-                                    sibling_plans.append(
-                                        AudioMutationPlan(
-                                            description=f"Promote embedded Sound {ref.node_id} in {ref.bank_name} to streamed (shared WEM {wid})",
-                                            target=SoundNodeTarget(
-                                                bank_name=ref.bank_name, sound_id=ref.node_id
-                                            ),
-                                            source=ExistingMediaReferenceSource(wem_id=wid),
-                                            effects=(
-                                                UpdateSoundNodeIntent(
-                                                    bank_name=ref.bank_name,
-                                                    sound_id=ref.node_id,
-                                                    new_stream_type=2,
-                                                    new_source_id=wid,
-                                                    new_file_id=wid,
-                                                ),
-                                                MarkBankModifiedIntent(bank_name=ref.bank_name),
-                                            ),
-                                        )
-                                    )
+                                    ref_bank = loaded_entry[0]
+                                    track_obj = find_music_track_in_bank(ref_bank, ref.node_id)
+                                    if track_obj is not None:
+                                        for s_idx, src in enumerate(track_obj.sources):
+                                            s_wid = getattr(src, "source_id", 0) or getattr(
+                                                src, "file_id", 0
+                                            )
+                                            if s_wid == wid and (
+                                                src.stream_type != 2
+                                                or getattr(src, "plugin_id", 0x00040001)
+                                                != 0x00010001
+                                            ):
+                                                if ref.bank_name not in banks:
+                                                    banks[ref.bank_name] = ref_bank
+                                                parent_seg = find_parent_segment_in_bank(
+                                                    ref_bank, track_obj.id
+                                                )
+                                                sibling_plans.append(
+                                                    AudioMutationPlan(
+                                                        description=(
+                                                            f"Promote MusicTrack {ref.node_id} source {s_idx} "
+                                                            f"in {ref.bank_name} to streamed PCM (shared WEM {wid})"
+                                                        ),
+                                                        target=MusicTrackTarget(
+                                                            bank_name=ref.bank_name,
+                                                            track_id=ref.node_id,
+                                                            source_index=s_idx,
+                                                        ),
+                                                        source=ExistingMediaReferenceSource(
+                                                            wem_id=wid
+                                                        ),
+                                                        effects=(
+                                                            UpdateMusicTrackNodeIntent(
+                                                                bank_name=ref.bank_name,
+                                                                track_id=ref.node_id,
+                                                                source_index=s_idx,
+                                                                new_stream_type=2,
+                                                                new_source_id=wid,
+                                                                new_file_id=wid,
+                                                                new_plugin_id=0x00010001,
+                                                            ),
+                                                            SyncMusicTimelineIntent(
+                                                                bank_name=ref.bank_name,
+                                                                track_id=ref.node_id,
+                                                                new_duration_ms=0.0,
+                                                                source_index=s_idx,
+                                                                parent_segment_id=(
+                                                                    parent_seg.id
+                                                                    if parent_seg
+                                                                    else None
+                                                                ),
+                                                            ),
+                                                            MarkBankModifiedIntent(
+                                                                bank_name=ref.bank_name
+                                                            ),
+                                                        ),
+                                                    )
+                                                )
+                                    else:
+                                        sound_obj = find_sound_in_bank(ref_bank, ref.node_id)
+                                        if sound_obj is not None and (
+                                            sound_obj.stream_type != 2
+                                            or getattr(sound_obj, "plugin_id", 0x00040001)
+                                            != 0x00010001
+                                        ):
+                                            if ref.bank_name not in banks:
+                                                banks[ref.bank_name] = ref_bank
+                                            sibling_plans.append(
+                                                AudioMutationPlan(
+                                                    description=f"Promote Sound {ref.node_id} in {ref.bank_name} to streamed PCM (shared WEM {wid})",
+                                                    target=SoundNodeTarget(
+                                                        bank_name=ref.bank_name,
+                                                        sound_id=ref.node_id,
+                                                    ),
+                                                    source=ExistingMediaReferenceSource(wem_id=wid),
+                                                    effects=(
+                                                        UpdateSoundNodeIntent(
+                                                            bank_name=ref.bank_name,
+                                                            sound_id=ref.node_id,
+                                                            new_stream_type=2,
+                                                            new_source_id=wid,
+                                                            new_file_id=wid,
+                                                            new_plugin_id=0x00010001,
+                                                        ),
+                                                        MarkBankModifiedIntent(
+                                                            bank_name=ref.bank_name
+                                                        ),
+                                                    ),
+                                                )
+                                            )
         return sibling_plans
 
     def _collect_batch_snapshots(
@@ -798,7 +936,11 @@ class WorkspaceSession:
             return BatchOutcome(applied=0, rejections=(), touched_banks=())
 
         banks = self._preload_batch_banks(batch)
-        batch_plan = plan_batch(banks=banks, batch=batch)
+        batch_plan = plan_batch(
+            banks=banks,
+            batch=batch,
+            reserved_wem_ids=self._collect_reserved_wem_ids(),
+        )
         if not batch_plan.plans:
             return BatchOutcome(applied=0, rejections=batch_plan.rejections, touched_banks=())
 
@@ -927,7 +1069,15 @@ class WorkspaceSession:
             elif isinstance(target, SoundNodeTarget):
                 node_key = f"hirc:{target.sound_id}"
             elif isinstance(target, MusicTrackTarget):
-                node_key = f"hirc:{target.track_id}"
+                track = find_music_track_in_bank(bank, target.track_id)
+                if track is not None and 0 <= target.source_index < len(track.sources):
+                    src_desc = track.sources[target.source_index]
+                    target_wem = getattr(src_desc, "source_id", 0) or getattr(
+                        src_desc, "file_id", 0
+                    )
+                    node_key = f"media:{target_wem}"
+                else:
+                    node_key = f"hirc:{target.track_id}"
             else:
                 continue
 
@@ -943,7 +1093,7 @@ class WorkspaceSession:
                 continue
 
             modified_wav = apply_modifiers_to_wav_bytes(wav_bytes, modifier_chain)
-            temp_filename = f"enhanced_{node_key.replace(':', '_')}.wav"
+            temp_filename = f"enhanced_{_node_key_for_target(target).replace(':', '_')}.wav"
             temp_path = source_audio_dir / temp_filename
             temp_path.write_bytes(modified_wav)
 

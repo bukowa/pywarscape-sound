@@ -20,8 +20,16 @@ from src.bnk.models import (
 )
 from src.engine.diff import BankDiffResult
 from src.engine.graph import BankGraphIndex
-from src.engine.metadata_fields import Provenance, extract_hirc_metadata
+from src.engine.metadata_fields import (
+    EMPTY_NODE_METADATA,
+    MetadataField,
+    MetadataValue,
+    NodeMetadata,
+    Provenance,
+    extract_hirc_metadata,
+)
 from src.engine.metadata_resolver import CompositeMetadataResolver, ResolutionContext
+from src.engine.wem_metadata import resolve_wem_duration_ms
 from src.models.hashing import KNOWN_HASH_NAMES
 from src.ui.features.bank_viewer.state import (
     GameEntitiesSection,
@@ -62,7 +70,24 @@ def _get_object_summary(obj: HircObject) -> tuple[str, str]:
         wid = getattr(obj, "source_id", 0) or getattr(obj, "file_id", 0)
         return "Sound", f"Media: {wid} ({st})"
     if isinstance(obj, CAkAction):
-        return "Action", f"Target -> {getattr(obj, 'target_id', 0)}"
+        cat = (obj.action_type >> 8) & 0xFF
+        params = getattr(obj, "params", None)
+        if cat == 0x12 and params is not None and params.state_group_id:
+            grp = _resolve_hash_name(params.state_group_id)
+            st = _resolve_hash_name(params.target_state_id or 0)
+            return "Action", f"SetState: {grp} = {st}"
+        if cat == 0x19 and params is not None and params.switch_group_id:
+            grp = _resolve_hash_name(params.switch_group_id)
+            sw = _resolve_hash_name(params.switch_state_id or 0)
+            return "Action", f"SetSwitch: {grp} = {sw}"
+        target_id = getattr(obj, "target_id", 0)
+        if cat == 0x01:
+            return "Action", f"Stop -> {target_id}" if target_id else "Stop (All)"
+        if cat == 0x02:
+            return "Action", f"Pause -> {target_id}" if target_id else "Pause (All)"
+        if cat == 0x03:
+            return "Action", f"Resume -> {target_id}" if target_id else "Resume (All)"
+        return "Action", f"Target -> {target_id}"
     if isinstance(obj, CAkEvent):
         return "Event", f"{len(obj.actions)} actions"
     if isinstance(obj, CAkRanSeqCntr):
@@ -225,6 +250,7 @@ def _build_properties_for_object(
             )
 
     elif isinstance(obj, CAkAction):
+        cat = (obj.action_type >> 8) & 0xFF
         props.append(
             InspectorProperty(
                 category="Action", label="Action Type", value=f"0x{obj.action_type:04X}"
@@ -235,6 +261,37 @@ def _build_properties_for_object(
                 category="Action", label="Target ID", value=str(getattr(obj, "target_id", 0))
             )
         )
+        params = getattr(obj, "params", None)
+        if cat == 0x12 and params is not None and params.state_group_id:
+            props.append(
+                InspectorProperty(
+                    category="Action",
+                    label="State Group",
+                    value=_resolve_hash_name(params.state_group_id, sound_db),
+                )
+            )
+            props.append(
+                InspectorProperty(
+                    category="Action",
+                    label="Target State",
+                    value=_resolve_hash_name(params.target_state_id or 0, sound_db),
+                )
+            )
+        elif cat == 0x19 and params is not None and params.switch_group_id:
+            props.append(
+                InspectorProperty(
+                    category="Action",
+                    label="Switch Group",
+                    value=_resolve_hash_name(params.switch_group_id, sound_db),
+                )
+            )
+            props.append(
+                InspectorProperty(
+                    category="Action",
+                    label="Target Switch",
+                    value=_resolve_hash_name(params.switch_state_id or 0, sound_db),
+                )
+            )
 
     elif isinstance(obj, CAkRanSeqCntr):
         props.append(
@@ -286,6 +343,13 @@ def _build_properties_for_object(
                 category="Music", label="Track Type", value=str(getattr(obj, "track_type", 0))
             )
         )
+        track_dur: float | None = (
+            getattr(obj.playlist[0], "src_duration", None) if obj.playlist else None
+        )
+        if track_dur is not None and track_dur > 0:
+            props.append(
+                InspectorProperty(category="Music", label="Duration (ms)", value=f"{track_dur:.1f}")
+            )
 
     elif isinstance(obj, CAkMusicSegment):
         props.append(
@@ -708,6 +772,76 @@ def build_details_for_node(
 
     if not node_key.startswith("hirc:"):
         return None
+
+    if ":src:" in node_key:
+        try:
+            parts = node_key.split(":src:")
+            obj_id = int(parts[0].removeprefix("hirc:"))
+            sub_idx = int(parts[1])
+        except ValueError:
+            return None
+        obj = graph_index.objects_by_id.get(obj_id)
+        if not isinstance(obj, CAkMusicTrack) or not (0 <= sub_idx < len(obj.sources)):
+            return None
+        src = obj.sources[sub_idx]
+        src_wem_id = src.source_id
+        is_streamed = src.stream_type == 2
+        sub_dur: float | None = next(
+            (c.src_duration for c in obj.playlist if c.source_id == src.source_id),
+            None,
+        )
+        if (sub_dur is None or sub_dur <= 0) and asset_resolver is not None:
+            sub_dur = resolve_wem_duration_ms(src.source_id, asset_resolver)
+
+        audio_refs = _build_audio_references_for_wem(
+            src_wem_id,
+            graph_index,
+            sound_db=sound_db,
+            bank_name=bank_name,
+            cross_bank_wem_refs_provider=cross_bank_wem_refs_provider,
+        )
+        parent_refs = _build_reference_summaries(
+            (f"hirc:{obj.id}",),
+            graph_index,
+            sound_db=sound_db,
+            bank_name=bank_name,
+        )
+        props: list[InspectorProperty] = [
+            InspectorProperty(category="Music", label="Source WEM ID", value=str(src_wem_id)),
+            InspectorProperty(
+                category="Music",
+                label="Stream Type",
+                value="Streamed" if is_streamed else "Embedded",
+            ),
+            InspectorProperty(
+                category="Music",
+                label="Duration (ms)",
+                value=f"{sub_dur:.1f}" if sub_dur is not None and sub_dur > 0 else "Unknown",
+            ),
+            InspectorProperty(
+                category="Music",
+                label="Track Type",
+                value=str(getattr(obj, "track_type", 0)),
+            ),
+            InspectorProperty(category="Music", label="Parent Track ID", value=str(obj.id)),
+        ]
+        sub_name = f"Sub-track {sub_idx + 1} (WEM: {src_wem_id})"
+        return NodeInspectorDetails(
+            node_key=node_key,
+            name=sub_name,
+            object_type="MusicTrack",
+            view_type=InspectorViewType.MUSIC,
+            object_id=obj.id,
+            hex_id=f"0x{obj.id:08X}",
+            properties=tuple(props),
+            parent_references=parent_refs,
+            child_references=(),
+            audio_references=audio_refs,
+            audio_reference_count=len(audio_refs),
+            is_streamed=is_streamed,
+            source_wem_id=src_wem_id,
+        )
+
     try:
         obj_id = int(node_key.removeprefix("hirc:"))
     except ValueError:
@@ -954,6 +1088,7 @@ def _build_hirc_section(
     bank_name: str = "",
     cross_bank_wem_refs_provider: Callable[[int], Sequence[Any]] | None = None,
     metadata_catalog: Any | None = None,
+    asset_resolver: Any | None = None,
 ) -> None:
     hier_roots: list[str] = []
     if bank.hirc:
@@ -977,6 +1112,73 @@ def _build_hirc_section(
             )
             h_f_det = h_meta.friendly_details if h_meta else None
 
+            hirc_meta = extract_hirc_metadata(obj)
+            if isinstance(obj, CAkMusicTrack):
+                track_dur: float | None = None
+                if obj.playlist:
+                    track_dur = getattr(obj.playlist[0], "src_duration", None)
+                if (track_dur is None or track_dur <= 0) and asset_resolver is not None:
+                    wid = obj.sources[0].source_id if obj.sources else getattr(obj, "source_id", 0)
+                    if wid > 0:
+                        track_dur = resolve_wem_duration_ms(wid, asset_resolver)
+                if track_dur is not None and track_dur > 0:
+                    dur_val = MetadataValue(round(track_dur, 1), Provenance.BINARY)
+                    hirc_meta = NodeMetadata(
+                        entries=(*hirc_meta.entries, (MetadataField.DURATION_MS, dur_val))
+                    )
+
+            sub_child_keys: list[str] = []
+            if isinstance(obj, CAkMusicTrack) and len(obj.sources) > 1:
+                for idx, src in enumerate(obj.sources):
+                    sub_key = f"hirc:{obj.id}:src:{idx}"
+                    sub_child_keys.append(sub_key)
+                    sub_dur: float | None = next(
+                        (c.src_duration for c in obj.playlist if c.source_id == src.source_id),
+                        None,
+                    )
+                    if (sub_dur is None or sub_dur <= 0) and asset_resolver is not None:
+                        sub_dur = resolve_wem_duration_ms(src.source_id, asset_resolver)
+                    sub_meta = EMPTY_NODE_METADATA
+                    if sub_dur is not None and sub_dur > 0:
+                        sub_meta = NodeMetadata(
+                            entries=(
+                                (
+                                    MetadataField.DURATION_MS,
+                                    MetadataValue(round(sub_dur, 1), Provenance.BINARY),
+                                ),
+                            )
+                        )
+                    sub_name = f"Sub-track {idx + 1} (WEM: {src.source_id})"
+                    nodes[sub_key] = HircTreeNode(
+                        key=sub_key,
+                        label=sub_name,
+                        id_str=str(src.source_id),
+                        type_str="MusicTrack",
+                        details=sub_name,
+                        child_keys=(),
+                        is_modified=is_obj_mod,
+                        friendly_label=sub_name,
+                        friendly_details=f"Source WEM: {src.source_id}",
+                        metadata=sub_meta,
+                        friendly_details_provenance=Provenance.BINARY,
+                    )
+                    if is_small:
+                        sub_det = build_details_for_node(
+                            bank,
+                            graph_index,
+                            sub_key,
+                            sound_db=sound_db,
+                            bank_name=bank_name,
+                            cross_bank_wem_refs_provider=cross_bank_wem_refs_provider,
+                            metadata_catalog=metadata_catalog,
+                            metadata_resolver=resolver,
+                            asset_resolver=asset_resolver,
+                        )
+                        if sub_det is not None:
+                            details[sub_key] = sub_det
+            if sub_child_keys:
+                child_keys = tuple(sub_child_keys)
+
             nodes[obj_key] = HircTreeNode(
                 key=obj_key,
                 label=raw_lbl,
@@ -987,7 +1189,7 @@ def _build_hirc_section(
                 is_modified=is_obj_mod,
                 friendly_label=h_f_lbl,
                 friendly_details=h_f_det,
-                metadata=extract_hirc_metadata(obj),
+                metadata=hirc_meta,
                 friendly_details_provenance=(h_meta.provenance if h_meta else Provenance.DATABASE),
             )
 
@@ -1001,6 +1203,7 @@ def _build_hirc_section(
                     cross_bank_wem_refs_provider=cross_bank_wem_refs_provider,
                     metadata_catalog=metadata_catalog,
                     metadata_resolver=resolver,
+                    asset_resolver=asset_resolver,
                 )
                 if det is not None:
                     details[obj_key] = det
@@ -1159,6 +1362,7 @@ def build_tree_and_details_from_bank(
         bank_name=bank_name,
         cross_bank_wem_refs_provider=cross_bank_wem_refs_provider,
         metadata_catalog=metadata_catalog,
+        asset_resolver=asset_resolver,
     )
 
     categorized = _build_categories_section(graph_index=graph_index, nodes=nodes)
@@ -1171,5 +1375,23 @@ def build_tree_and_details_from_bank(
         categorized=categorized,
     )
 
-    root_keys = ("group:chunks", "group:hierarchy", "group:categories")
+    has_hirc = bool(bank.hirc and bank.hirc.objects)
+    has_didx = bool(bank.didx and bank.didx.entries)
+    if not has_hirc and not has_didx:
+        empty_msg = "Empty vanilla stub bank (all interactive music is in global_music.bnk)"
+        info_key = "info:empty_stub"
+        nodes[info_key] = HircTreeNode(
+            key=info_key,
+            label=empty_msg,
+            id_str="",
+            type_str="Info",
+            details=empty_msg,
+            friendly_label=empty_msg,
+            friendly_details=empty_msg,
+        )
+        if "group:hierarchy" in nodes:
+            nodes["group:hierarchy"] = replace(nodes["group:hierarchy"], details=empty_msg)
+        root_keys = (info_key, "group:chunks", "group:hierarchy", "group:categories")
+    else:
+        root_keys = ("group:chunks", "group:hierarchy", "group:categories")
     return root_keys, nodes, details

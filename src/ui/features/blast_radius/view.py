@@ -124,8 +124,10 @@ class BlastRadiusDialog(QDialog):
         )
         btn_row.addWidget(self.btn_overwrite)
 
-        self.btn_isolate = QPushButton("Isolate / Fork (This Node Only)")
+        self.btn_isolate = QPushButton("Isolate (Only this slot)")
         self.btn_isolate.setStyleSheet(BTN_STYLE_PRIMARY)
+        self.btn_isolate.setDefault(True)
+        self.btn_isolate.setFocus()
         self.btn_isolate.clicked.connect(
             lambda: self.store.choose_action(BlastRadiusAction.ISOLATE)
         )
@@ -163,8 +165,13 @@ class BlastRadiusDialog(QDialog):
                     f"or 'Replace Everywhere / Overwrite' to update the shared audio for all referencing nodes."
                 )
                 self.btn_isolate.setVisible(True)
+                self.btn_isolate.setText("Isolate (Only this slot)")
+                self.btn_isolate.setStyleSheet(BTN_STYLE_PRIMARY)
+                self.btn_isolate.setDefault(True)
+                self.btn_isolate.setFocus()
                 self.btn_overwrite.setText("Replace Everywhere / Overwrite")
                 self.btn_overwrite.setStyleSheet(BTN_STYLE_SECONDARY)
+                self.btn_overwrite.setDefault(False)
 
             self.lbl_table_header.setText(f"Affected Referencing Nodes ({len(state.items)}):")
             self.table.setRowCount(len(state.items))

@@ -1,0 +1,236 @@
+[
+  {
+    "node_type": "Sound",
+    "action": "replace",
+    "expected_status": "supported",
+    "expected_reason": ""
+  },
+  {
+    "node_type": "Sound",
+    "action": "listen",
+    "expected_status": "supported",
+    "expected_reason": ""
+  },
+  {
+    "node_type": "Sound",
+    "action": "see_plays_when",
+    "expected_status": "supported",
+    "expected_reason": ""
+  },
+  {
+    "node_type": "Sound",
+    "action": "see_shared_references",
+    "expected_status": "supported",
+    "expected_reason": ""
+  },
+  {
+    "node_type": "Sound",
+    "action": "see_duration",
+    "expected_status": "supported",
+    "expected_reason": ""
+  },
+  {
+    "node_type": "Sound",
+    "action": "export_wav",
+    "expected_status": "supported",
+    "expected_reason": ""
+  },
+  {
+    "node_type": "Sound",
+    "action": "mute",
+    "expected_status": "supported",
+    "expected_reason": ""
+  },
+  {
+    "node_type": "Sound",
+    "action": "enhance",
+    "expected_status": "supported",
+    "expected_reason": ""
+  },
+  {
+    "node_type": "Sound",
+    "action": "edit_volume_pitch",
+    "expected_status": "disabled",
+    "expected_reason_contains": "future release"
+  },
+  {
+    "node_type": "Sound",
+    "action": "add_variation",
+    "expected_status": "disabled",
+    "expected_reason_contains": "leaf audio sources"
+  },
+  {
+    "node_type": "MusicTrack",
+    "action": "listen",
+    "expected_status": "supported",
+    "expected_reason": ""
+  },
+  {
+    "node_type": "MusicTrack",
+    "action": "see_plays_when",
+    "expected_status": "supported",
+    "expected_reason": ""
+  },
+  {
+    "node_type": "MusicTrack",
+    "action": "see_shared_references",
+    "expected_status": "supported",
+    "expected_reason": ""
+  },
+  {
+    "node_type": "MusicTrack",
+    "action": "see_duration",
+    "expected_status": "supported",
+    "expected_reason": ""
+  },
+  {
+    "node_type": "MusicTrack",
+    "action": "export_wav",
+    "expected_status": "supported",
+    "expected_reason": ""
+  },
+  {
+    "node_type": "MusicTrack",
+    "action": "replace",
+    "expected_status": "supported",
+    "expected_reason": ""
+  },
+  {
+    "node_type": "MusicTrack",
+    "action": "mute",
+    "expected_status": "supported",
+    "expected_reason": ""
+  },
+  {
+    "node_type": "MusicTrack",
+    "action": "enhance",
+    "expected_status": "supported",
+    "expected_reason": ""
+  },
+  {
+    "node_type": "MusicTrack",
+    "action": "edit_volume_pitch",
+    "expected_status": "disabled",
+    "expected_reason_contains": "future release"
+  },
+  {
+    "node_type": "MusicTrack",
+    "action": "add_variation",
+    "expected_status": "disabled",
+    "expected_reason_contains": "not yet supported"
+  },
+  {
+    "node_type": "Media",
+    "action": "listen",
+    "expected_status": "supported",
+    "expected_reason": ""
+  },
+  {
+    "node_type": "Media",
+    "action": "see_plays_when",
+    "expected_status": "disabled",
+    "expected_reason_contains": "Embedded recording rows"
+  },
+  {
+    "node_type": "Media",
+    "action": "see_shared_references",
+    "expected_status": "supported",
+    "expected_reason": ""
+  },
+  {
+    "node_type": "Media",
+    "action": "see_duration",
+    "expected_status": "supported",
+    "expected_reason": ""
+  },
+  {
+    "node_type": "Media",
+    "action": "export_wav",
+    "expected_status": "supported",
+    "expected_reason": ""
+  },
+  {
+    "node_type": "Media",
+    "action": "replace",
+    "expected_status": "supported",
+    "expected_reason": ""
+  },
+  {
+    "node_type": "Media",
+    "action": "mute",
+    "expected_status": "supported",
+    "expected_reason": ""
+  },
+  {
+    "node_type": "Media",
+    "action": "enhance",
+    "expected_status": "supported",
+    "expected_reason": ""
+  },
+  {
+    "node_type": "Media",
+    "action": "edit_volume_pitch",
+    "expected_status": "disabled",
+    "expected_reason_contains": "Embedded recording rows"
+  },
+  {
+    "node_type": "Media",
+    "action": "add_variation",
+    "expected_status": "disabled",
+    "expected_reason_contains": "Embedded recording rows"
+  },
+  {
+    "node_type": "Event",
+    "action": "see_plays_when",
+    "expected_status": "supported",
+    "expected_reason": ""
+  },
+  {
+    "node_type": "Event",
+    "action": "replace",
+    "expected_status": "disabled",
+    "expected_reason_contains": "playable"
+  },
+  {
+    "node_type": "RanSeqCntr",
+    "action": "see_plays_when",
+    "expected_status": "supported",
+    "expected_reason": ""
+  },
+  {
+    "node_type": "RanSeqCntr",
+    "action": "replace",
+    "expected_status": "disabled",
+    "expected_reason_contains": "playable"
+  },
+  {
+    "node_type": "MusicSwitchCntr",
+    "action": "see_plays_when",
+    "expected_status": "disabled",
+    "expected_reason_contains": "not yet implemented"
+  },
+  {
+    "node_type": "MusicSwitchCntr",
+    "action": "listen",
+    "expected_status": "disabled",
+    "expected_reason_contains": "playable"
+  },
+  {
+    "node_type": "Bus",
+    "action": "listen",
+    "expected_status": "disabled",
+    "expected_reason_contains": "playable"
+  },
+  {
+    "node_type": "Bus",
+    "action": "see_plays_when",
+    "expected_status": "disabled",
+    "expected_reason_contains": "structural routing"
+  },
+  {
+    "node_type": "UnknownNode",
+    "action": "replace",
+    "expected_status": "disabled",
+    "expected_reason_contains": "unknown or not supported"
+  }
+]

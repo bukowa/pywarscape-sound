@@ -703,13 +703,25 @@ class BankViewerStore:
                     pass
             elif key.startswith("hirc:"):
                 try:
-                    node = self.state.nodes_by_key.get(key)
-                    raw_id = node.id_str if (node and node.id_str) else key.removeprefix("hirc:")
-                    hirc_id = int(raw_id)
-                    if node and node.type_str == "MusicTrack":
-                        target = MusicTrackTarget(bank_name=bank_name, track_id=hirc_id)
+                    parts = key.split(":")
+                    if len(parts) >= 4 and parts[2] == "src":
+                        track_id = int(parts[1])
+                        source_index = int(parts[3])
+                        target = MusicTrackTarget(
+                            bank_name=bank_name,
+                            track_id=track_id,
+                            source_index=source_index,
+                        )
                     else:
-                        target = SoundNodeTarget(bank_name=bank_name, sound_id=hirc_id)
+                        node = self.state.nodes_by_key.get(key)
+                        raw_id = (
+                            node.id_str if (node and node.id_str) else key.removeprefix("hirc:")
+                        )
+                        hirc_id = int(raw_id)
+                        if node and node.type_str == "MusicTrack":
+                            target = MusicTrackTarget(bank_name=bank_name, track_id=hirc_id)
+                        else:
+                            target = SoundNodeTarget(bank_name=bank_name, sound_id=hirc_id)
                     items.append(BatchItem(target=target, source=SilentStubSource(stub_wem_id=1)))
                 except ValueError:
                     pass

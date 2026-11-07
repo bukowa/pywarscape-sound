@@ -2,6 +2,7 @@
 
 from src.bnk.bank import BkhdChunk, HircChunk, SoundBank
 from src.bnk.chunks import DidxChunk, DidxEntry
+from src.bnk.database import fnv1_32
 from src.bnk.models import CAkAction, CAkEvent, CAkSound
 from src.engine.diff import BankDiffResult
 from src.engine.graph import BankGraphIndex
@@ -97,3 +98,18 @@ def test_builder_propagation_for_hirc_referencing_modified_media():
 
     # Chunks group should NOT have has_modified_children since this bank has no DIDX
     assert nodes["group:chunks"].has_modified_children is False
+
+
+def test_builder_empty_stub_bank():
+    bank = SoundBank(
+        header=BkhdChunk(bank_id=fnv1_32("battle_music"), version=112),
+        hirc=HircChunk(objects=[]),
+    )
+    graph = BankGraphIndex.build(bank)
+    roots, nodes, details = build_tree_and_details_from_bank(bank, graph)
+    assert "info:empty_stub" in roots
+    assert roots[0] == "info:empty_stub"
+    stub_node = nodes["info:empty_stub"]
+    expected_msg = "Empty vanilla stub bank (all interactive music is in global_music.bnk)"
+    assert expected_msg in stub_node.label
+    assert expected_msg in nodes["group:hierarchy"].details

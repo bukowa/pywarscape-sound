@@ -396,7 +396,12 @@ def reconcile(
         case BatchOutcomeReceived(outcome=outcome):
             msg = f"Applied {outcome.applied} change(s)"
             if outcome.rejections:
-                msg += f" ({len(outcome.rejections)} rejected)"
+                rej_count = len(outcome.rejections)
+                reasons = list(dict.fromkeys(r.reason for _, r in outcome.rejections if r.reason))
+                if reasons:
+                    msg += f" ({rej_count} rejected: {'; '.join(reasons)})"
+                else:
+                    msg += f" ({rej_count} rejected)"
             return replace(state, last_outcome=outcome, status_message=msg), ()
 
         case _ as unreachable:

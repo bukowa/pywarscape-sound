@@ -6,6 +6,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QHeaderView,
     QLabel,
+    QPushButton,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -14,6 +15,7 @@ from PySide6.QtWidgets import (
 
 from src.ui.features.bank_viewer.state import NodeInspectorDetails
 from src.ui.theme import (
+    BTN_STYLE_SECONDARY,
     COLOR_BG_INPUT,
     COLOR_BG_PANEL,
     COLOR_BORDER,
@@ -29,9 +31,11 @@ class MusicInspectorView(QWidget):
     """Dedicated inspector view for CAkMusicTrack and CAkMusicSegment nodes."""
 
     jump_requested = Signal(str)
+    export_requested = Signal(int)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        self._current_object_id: int | None = None
         self._init_ui()
 
     def _init_ui(self) -> None:
@@ -65,7 +69,47 @@ class MusicInspectorView(QWidget):
         info_row.addWidget(self.lbl_duration)
         info_row.addStretch()
         sc_layout.addLayout(info_row)
+
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(6)
+        self.btn_export = QPushButton("Export WAV...")
+        self.btn_export.setStyleSheet(BTN_STYLE_SECONDARY)
+        self.btn_export.setEnabled(False)
+        self.btn_export.clicked.connect(self._on_export_clicked)
+        btn_row.addWidget(self.btn_export)
+        btn_row.addStretch()
+        sc_layout.addLayout(btn_row)
+
         layout.addWidget(self.summary_card)
+
+        # Audio References Section (Cross-Bank / Shared WEM References)
+        self.lbl_refs = QLabel("Audio WEM References (0) — Double-click to navigate")
+        self.lbl_refs.setStyleSheet(
+            f"color: {COLOR_TEXT_SECONDARY}; font-size: 11px; font-weight: bold;"
+        )
+        layout.addWidget(self.lbl_refs)
+
+        self.ref_table = QTableWidget(0, 4)
+        self.ref_table.setHorizontalHeaderLabels(["Bank", "HIRC ID", "Name / Alias", "Type"])
+        rhdr = self.ref_table.horizontalHeader()
+        rhdr.setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
+        rhdr.setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)
+        rhdr.setSectionResizeMode(2, QHeaderView.ResizeMode.Interactive)
+        rhdr.setStretchLastSection(True)
+        self.ref_table.setColumnWidth(0, 110)
+        self.ref_table.setColumnWidth(1, 80)
+        self.ref_table.setColumnWidth(2, 130)
+        self.ref_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.ref_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.ref_table.cellDoubleClicked.connect(self._on_ref_double_clicked)
+        self.ref_table.setStyleSheet(
+            f"QTableWidget {{ background-color: {COLOR_BG_INPUT}; border: 1px solid {COLOR_BORDER}; "
+            f"border-radius: 4px; color: {COLOR_TEXT_PRIMARY}; font-size: 11px; }} "
+            f"QTableWidget::item {{ padding: 3px 6px; }} "
+            f"QHeaderView::section {{ background-color: {COLOR_BG_PANEL}; color: {COLOR_TEXT_SECONDARY}; "
+            f"font-weight: bold; border: 1px solid {COLOR_BORDER}; padding: 3px; }}"
+        )
+        layout.addWidget(self.ref_table, 1)
 
         # Linked Tracks / Children Table
         lbl_tracks = QLabel("Tracks / Child Segments (Double-click to navigate)")
@@ -94,6 +138,17 @@ class MusicInspectorView(QWidget):
         )
         layout.addWidget(self.tracks_table, 1)
 
+    def _on_export_clicked(self) -> None:
+        if self._current_object_id is not None:
+            self.export_requested.emit(self._current_object_id)
+
+    def _on_ref_double_clicked(self, row: int, _col: int) -> None:
+        item = self.ref_table.item(row, 0)
+        if item is not None:
+            target_key = item.data(_ROLE_TARGET_KEY)
+            if target_key:
+                self.jump_requested.emit(target_key)
+
     def _on_cell_double_clicked(self, row: int, _col: int) -> None:
         item = self.tracks_table.item(row, 0)
         if item is not None:
@@ -104,12 +159,23 @@ class MusicInspectorView(QWidget):
     def render(self, details: NodeInspectorDetails | None) -> None:
         """Projects music details with strict signal blocking."""
         self.tracks_table.blockSignals(True)
+        self.ref_table.blockSignals(True)
         if details is None:
+            self._current_object_id = None
             self.lbl_source.setText("Source WEM: -")
             self.lbl_duration.setText("Duration: -")
+            self.lbl_refs.setText("Audio WEM References (0) — Double-click to navigate")
+            self.btn_export.setEnabled(False)
             self.tracks_table.setRowCount(0)
+            self.ref_table.setRowCount(0)
             self.tracks_table.blockSignals(False)
+            self.ref_table.blockSignals(False)
             return
+
+        self._current_object_id = details.object_id
+        self.btn_export.setEnabled(
+            details.object_id is not None or details.source_wem_id is not None
+        )
 
         wem_str = "-"
         dur_str = "-"
@@ -121,6 +187,26 @@ class MusicInspectorView(QWidget):
 
         self.lbl_source.setText(f"Source WEM: {wem_str}")
         self.lbl_duration.setText(f"Duration: {dur_str}")
+
+        # Render Audio WEM References
+        refs = details.audio_references
+        ref_count = details.audio_reference_count if details.audio_reference_count else len(refs)
+        self.lbl_refs.setText(f"Audio WEM References ({ref_count}) — Double-click to navigate")
+        self.ref_table.setRowCount(len(refs))
+        for row, ref in enumerate(refs):
+            jump_key = f"{ref.bank_name}::{ref.key}" if ref.bank_name else ref.key
+            bank_item = QTableWidgetItem(ref.bank_name or "-")
+            bank_item.setData(_ROLE_TARGET_KEY, jump_key)
+            id_item = QTableWidgetItem(ref.id_str)
+            id_item.setData(_ROLE_TARGET_KEY, jump_key)
+            name_item = QTableWidgetItem(ref.label)
+            name_item.setData(_ROLE_TARGET_KEY, jump_key)
+            type_item = QTableWidgetItem(ref.type_str)
+            type_item.setData(_ROLE_TARGET_KEY, jump_key)
+            self.ref_table.setItem(row, 0, bank_item)
+            self.ref_table.setItem(row, 1, id_item)
+            self.ref_table.setItem(row, 2, name_item)
+            self.ref_table.setItem(row, 3, type_item)
 
         tracks = details.child_references
         self.tracks_table.setRowCount(len(tracks))
@@ -135,4 +221,6 @@ class MusicInspectorView(QWidget):
             self.tracks_table.setItem(row, 0, id_item)
             self.tracks_table.setItem(row, 1, name_item)
             self.tracks_table.setItem(row, 2, type_item)
+
         self.tracks_table.blockSignals(False)
+        self.ref_table.blockSignals(False)

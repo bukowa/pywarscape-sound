@@ -8,7 +8,11 @@ from pathlib import Path
 from PySide6.QtCore import Qt
 
 from src.engine.ontology import (
+    BatchItem,
+    BatchOutcome,
     ExternalFileSource,
+    MusicTrackTarget,
+    PlanRejection,
     SilentStubSource,
     SoundNodeTarget,
 )
@@ -526,3 +530,32 @@ def test_enhance_tab_preview_button_and_transport_trigger(qtbot):
     tgt, settings = preview_payloads[-1]
     assert tgt == target
     assert settings.gain_db == 3.5
+
+
+def test_audio_sources_view_displays_rejection_reason_on_status_label(qtbot):
+    """Verify view.render(state) displays rejection reason text on the status label with warning style."""
+    from src.ui.theme import COLOR_WARNING
+
+    store = AudioSourcesStore()
+    view = AudioSourcesView(store)
+    qtbot.addWidget(view)
+
+    target = MusicTrackTarget(bank_name="music.bnk", track_id=5001)
+    source = ExternalFileSource(file_path=Path("track.wav"))
+    item = BatchItem(target=target, source=source)
+    rejection = PlanRejection(
+        code="UNSUPPORTED_TARGET",
+        reason="Planning not implemented for target type MusicTrackTarget",
+    )
+    outcome = BatchOutcome(
+        applied=0,
+        rejections=((item, rejection),),
+        touched_banks=(),
+    )
+
+    store.receive_batch_outcome(outcome)
+
+    assert "Planning not implemented for target type MusicTrackTarget" in view.lbl_status.text()
+    assert view.lbl_status.wordWrap() is True
+    assert "Planning not implemented for target type MusicTrackTarget" in view.lbl_status.toolTip()
+    assert COLOR_WARNING.lower() in view.lbl_status.styleSheet().lower()

@@ -1,5 +1,15 @@
 """Layer 2 Pure Engine package for SoundBank mutation, graphs, and integrity."""
 
+from src.engine.capabilities import (
+    ActionCapability,
+    BankGroupSpec,
+    CapabilityMatrix,
+    NodeCapabilities,
+    capabilities_for_node,
+    classify_bank_group,
+    get_capability_matrix,
+    query_capability,
+)
 from src.engine.catalog_discovery import build_audio_catalog_for_bank
 from src.engine.ontology import (
     AppendVariationIntent,
@@ -22,6 +32,7 @@ from src.engine.ontology import (
     StageLooseWemIntent,
     StageMasterAudioIntent,
     SyncMusicTimelineIntent,
+    UpdateMusicTrackNodeIntent,
     UpdateSoundNodeIntent,
     WemId,
 )
@@ -30,13 +41,16 @@ from src.engine.session import WorkspaceSession
 from src.models import AudioCatalogEntry
 
 __all__ = [
+    "ActionCapability",
     "AppendVariationIntent",
     "AudioCatalogEntry",
     "AudioMutationEffectIntent",
     "AudioMutationPlan",
     "AudioReplacementSource",
     "AudioStreamMode",
+    "BankGroupSpec",
     "BankName",
+    "CapabilityMatrix",
     "ContainerVariationTarget",
     "CrossBankCloneSource",
     "ExistingMediaReferenceSource",
@@ -45,16 +59,22 @@ __all__ = [
     "MarkBankModifiedIntent",
     "MusicTrackTarget",
     "MutationTarget",
+    "NodeCapabilities",
     "PlanRejection",
     "SilentStubSource",
     "SoundNodeTarget",
     "StageLooseWemIntent",
     "StageMasterAudioIntent",
     "SyncMusicTimelineIntent",
+    "UpdateMusicTrackNodeIntent",
     "UpdateSoundNodeIntent",
     "WemId",
     "WorkspaceSession",
     "build_audio_catalog_for_bank",
+    "capabilities_for_node",
+    "classify_bank_group",
+    "get_capability_matrix",
     "plan_audio_replacement",
+    "query_capability",
     "try_plan_audio_replacement",
 ]

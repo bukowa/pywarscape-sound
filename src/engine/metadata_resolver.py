@@ -10,6 +10,7 @@ databases and event_data.dat with zero Qt dependencies.
 from __future__ import annotations
 
 import logging
+import struct
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol
 
@@ -17,6 +18,9 @@ from src.bnk.models import (
     CAkAction,
     CAkDialogueEvent,
     CAkEvent,
+    CAkMusicRanSeqCntr,
+    CAkMusicSegment,
+    CAkMusicSwitchCntr,
     CAkMusicTrack,
     CAkRanSeqCntr,
     CAkSound,
@@ -49,6 +53,8 @@ class NodeMetadataInfo:
     friendly_details: str | None = None
     event_name: str | None = None
     provenance: Provenance = Provenance.DATABASE
+    switch_path: str | None = None
+    context_summary: str | None = None
 
 
 @dataclass(slots=True)
@@ -366,7 +372,86 @@ class GraphHierarchyProvider:
                     friendly_details=f"Event: {parent_event} • {count} variations",
                     event_name=parent_event,
                 )
+        elif isinstance(
+            obj, (CAkMusicTrack, CAkMusicSegment, CAkMusicRanSeqCntr, CAkMusicSwitchCntr)
+        ):
+            switch_path, context_summary = self._resolve_music_switch_context(
+                obj.id, graph_index, bank, ctx.sound_db
+            )
+            if switch_path:
+                details = (
+                    f"Switch: {switch_path}"
+                    if switch_path != "Transition Bridge"
+                    else "Transition Bridge"
+                )
+                return NodeMetadataInfo(
+                    friendly_label=None,
+                    category="Music",
+                    friendly_details=details,
+                    switch_path=switch_path,
+                    context_summary=context_summary,
+                )
         return None
+
+    def _resolve_music_switch_context(
+        self,
+        node_id: int,
+        graph_index: BankGraphIndex,
+        bank: SoundBank,
+        sound_db: Any | None,
+    ) -> tuple[str | None, str | None]:
+        """Traces parent CAkMusicSwitchCntr decision-tree paths or transition rules for a music object."""
+        paths: list[str] = []
+
+        def dfs(curr_id: int, current_steps: list[str], visited: frozenset[int]) -> None:
+            if curr_id in visited:
+                return
+            new_visited = visited | {curr_id}
+            parents = graph_index.get_parent_ids(curr_id)
+            if not parents:
+                if current_steps:
+                    paths.append(" > ".join(reversed(current_steps)))
+                return
+            for pid in parents:
+                p_obj = graph_index.objects_by_id.get(pid)
+                new_steps = list(current_steps)
+                if isinstance(p_obj, (CAkMusicSwitchCntr, CAkMusicRanSeqCntr)):
+                    tp = getattr(p_obj, "trans_params", None)
+                    if tp and hasattr(tp, "rules"):
+                        is_trans_bridge = False
+                        for r in tp.rules:
+                            if (
+                                getattr(r, "alloc_trans_object_flag", 0) != 0
+                                and len(getattr(r, "trans_object", b"")) >= 4
+                            ):
+                                sid = struct.unpack_from("<I", r.trans_object, 0)[0]
+                                if sid == curr_id:
+                                    is_trans_bridge = True
+                                    break
+                        if is_trans_bridge:
+                            new_steps.append("Transition Bridge")
+                if isinstance(p_obj, CAkMusicSwitchCntr) and hasattr(p_obj, "tree"):
+                    for n in p_obj.tree.nodes:
+                        if n.is_leaf and n.audio_node_id == curr_id:
+                            gid = p_obj.arguments[0][0] if p_obj.arguments else 0
+                            gname = resolve_hash_name(gid, bank, sound_db=sound_db) or str(gid)
+                            bname = (
+                                resolve_hash_name(n.key, bank, sound_db=sound_db)
+                                if n.key != 0
+                                else "none"
+                            )
+                            step = f"{gname}={bname}"
+                            if not new_steps or new_steps[-1] != step:
+                                new_steps.append(step)
+                            break
+                dfs(pid, new_steps, new_visited)
+
+        dfs(node_id, [], frozenset())
+        unique_paths = list(dict.fromkeys(paths))
+        if not unique_paths:
+            return None, None
+        primary_path = unique_paths[0]
+        return primary_path, primary_path
 
     def resolve_media(
         self,
@@ -483,6 +568,8 @@ class CompositeMetadataResolver:
         merged_entities: list[str] = []
         merged_details: str | None = None
         merged_event: str | None = None
+        merged_switch_path: str | None = None
+        merged_context_summary: str | None = None
         details_provenance: Provenance | None = None
         label_provenance: Provenance | None = None
 
@@ -506,15 +593,32 @@ class CompositeMetadataResolver:
                         details_provenance = info.provenance
                     if not merged_event and info.event_name:
                         merged_event = info.event_name
+                    if not merged_switch_path and info.switch_path:
+                        merged_switch_path = info.switch_path
+                    if not merged_context_summary and info.context_summary:
+                        merged_context_summary = info.context_summary
             except Exception as e:
                 logger.debug(
                     "Provider %s failed for HIRC %s: %s", type(provider).__name__, obj.id, e
                 )
                 continue
 
-        if not any((merged_label, merged_cat, merged_entities, merged_details, merged_event)):
+        if not any(
+            (
+                merged_label,
+                merged_cat,
+                merged_entities,
+                merged_details,
+                merged_event,
+                merged_switch_path,
+                merged_context_summary,
+            )
+        ):
             self._hirc_cache[cache_key] = None
             return None
+
+        if not merged_details and merged_context_summary:
+            merged_details = merged_context_summary
 
         final_provenance = (
             details_provenance
@@ -528,6 +632,8 @@ class CompositeMetadataResolver:
             friendly_details=merged_details,
             event_name=merged_event,
             provenance=final_provenance,
+            switch_path=merged_switch_path,
+            context_summary=merged_context_summary,
         )
         self._hirc_cache[cache_key] = result
         return result

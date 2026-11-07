@@ -6,8 +6,8 @@ import logging
 from collections.abc import Callable
 from typing import Any, assert_never
 
-from src.bnk.models import CAkSound
-from src.engine.ontology import ReplacementScope
+from src.bnk.models import CAkMusicTrack, CAkSound
+from src.engine.ontology import MusicTrackTarget, ReplacementScope, SoundNodeTarget
 from src.engine.session import WorkspaceSession
 from src.ui.features.blast_radius.causation import reconcile_blast_radius
 from src.ui.features.blast_radius.state import (
@@ -75,15 +75,27 @@ class BlastRadiusStore:
 def check_replacement_branch(
     session: WorkspaceSession,
     bank_name: str,
-    sound_id: int,
+    sound_id: int | SoundNodeTarget | MusicTrackTarget,
     parent_widget: Any | None = None,
+    source_index: int = 0,
+    prompt_on_embedded_unshared: bool = True,
 ) -> tuple[bool, ReplacementScope]:
     """
-    Evaluates the blast radius and stream type of a target sound node before replacement:
+    Evaluates the blast radius and stream type of a target sound or music track node before replacement:
     - Branch A (unshared streamed, <= 1 ref and stream_type == 2): returns (True, OVERWRITE) immediately.
     - Branch B (unshared embedded, <= 1 ref and embedded): shows Promotion Notice dialog.
     - Branch C (shared WEM, > 1 ref across loaded banks): shows Blast Radius confirmation dialog.
     """
+    if isinstance(sound_id, MusicTrackTarget):
+        bank_name = sound_id.bank_name
+        source_index = sound_id.source_index
+        target_node_id = sound_id.track_id
+    elif isinstance(sound_id, SoundNodeTarget):
+        bank_name = sound_id.bank_name
+        target_node_id = sound_id.sound_id
+    else:
+        target_node_id = int(sound_id)
+
     entry = session.get_loaded_entry(bank_name)
     if entry is None:
         try:
@@ -92,18 +104,32 @@ def check_replacement_branch(
             return (True, ReplacementScope.OVERWRITE)
 
     bank, graph_index, _ = entry
-    obj = graph_index.objects_by_id.get(sound_id)
+    obj = graph_index.objects_by_id.get(target_node_id)
     if obj is None and bank.hirc:
         for h_obj in bank.hirc.objects:
-            if h_obj.id == sound_id:
+            if h_obj.id == target_node_id:
                 obj = h_obj
                 break
 
-    if obj is None or not isinstance(obj, CAkSound):
+    if obj is None:
         return (True, ReplacementScope.OVERWRITE)
 
-    wem_id = session.extract_sound_wem_id(obj)
-    st = getattr(obj, "stream_type", 2)
+    wem_id = 0
+    st = 2
+    if isinstance(obj, CAkMusicTrack):
+        if hasattr(obj, "sources") and obj.sources and 0 <= source_index < len(obj.sources):
+            src_desc = obj.sources[source_index]
+            wem_id = getattr(src_desc, "source_id", 0) or getattr(src_desc, "file_id", 0)
+            st = getattr(src_desc, "stream_type", 2)
+    elif isinstance(obj, CAkSound):
+        wem_id = session.extract_sound_wem_id(obj)
+        st = getattr(obj, "stream_type", 2)
+    else:
+        return (True, ReplacementScope.OVERWRITE)
+
+    if wem_id <= 0:
+        return (True, ReplacementScope.OVERWRITE)
+
     is_in_didx = (
         bank.didx is not None
         and bool(bank.didx.entries)
@@ -115,7 +141,7 @@ def check_replacement_branch(
     ref_count = len(refs)
 
     # Branch A: Unshared streamed -> replace immediately without modal confirmation
-    if ref_count <= 1 and not is_embedded:
+    if ref_count <= 1 and (not is_embedded or not prompt_on_embedded_unshared):
         return (True, ReplacementScope.OVERWRITE)
 
     impact_items = tuple(
@@ -137,7 +163,7 @@ def check_replacement_branch(
     init_state = BlastRadiusState(
         mode=mode,
         target_bank_name=bank_name,
-        target_node_id=sound_id,
+        target_node_id=target_node_id,
         wem_id=wem_id,
         items=impact_items,
     )

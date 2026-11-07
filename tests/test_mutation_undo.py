@@ -7,10 +7,19 @@ from pathlib import Path
 import pytest
 
 from src.bnk.bank import BkhdChunk, HircChunk, SoundBank
-from src.bnk.models import CAkSound
+from src.bnk.models import (
+    AkMusicMarker,
+    AkMusicTrackSource,
+    AkTrackSrcInfo,
+    CAkMusicSegment,
+    CAkMusicTrack,
+    CAkSound,
+)
 from src.engine.ontology import (
     BatchItem,
     ExternalFileSource,
+    MediaNodeTarget,
+    MusicTrackTarget,
     MutationBatch,
     MutationRecord,
     ReplacementScope,
@@ -638,3 +647,185 @@ def test_sequential_overwrites_multi_level_undo_preserves_history(tmp_path: Path
     # Redo 2: should restore v3 bytes
     session.redo_mutation()
     assert (project.audio_dir / "12345.wem").read_bytes() == v3_bytes
+
+
+def test_music_track_mutation_undo_redo_round_trip(tmp_path: Path):
+    """
+    Verifies that mutating a CAkMusicTrack scales segment timeline & markers,
+    updates plugin_id to PCM 0x00010001, and undo restores the SoundBank bit-exactly.
+    """
+    proj_dir = tmp_path / "MusicMod"
+    project = ProjectStorage.create_project(proj_dir, name="MusicMod", game=GameType.ATTILA)
+    session = WorkspaceSession(project=project)
+
+    initial_markers = [
+        AkMusicMarker(id=1, position=0.0, name="<Entry>"),
+        AkMusicMarker(id=2, position=2500.0, name="Verse"),
+        AkMusicMarker(id=3, position=5000.0, name="<Exit>"),
+    ]
+    seg = CAkMusicSegment(
+        id=1000,
+        child_ids=[2000],
+        duration=5000.0,
+        markers=list(initial_markers),
+    )
+    track = CAkMusicTrack(
+        id=2000,
+        sources=[
+            AkMusicTrackSource(
+                plugin_id=0x00040001,  # Vorbis
+                stream_type=2,
+                source_id=88888,
+                file_id=88888,
+            )
+        ],
+        playlist=[AkTrackSrcInfo(track_id=2000, source_id=88888, src_duration=5000.0)],
+    )
+    bank = SoundBank(
+        header=BkhdChunk(bank_id=900, version=112),
+        hirc=HircChunk(objects=[seg, track]),
+    )
+    orig_bytes = bank.to_bytes()
+    session.index_soundbank("music.bnk", bank)
+
+    # Apply mutation replacing music track audio
+    custom_wav = make_synthetic_wav(tmp_path / "music.wav", duration_s=0.1)
+    batch = MutationBatch(
+        description="Replace music track",
+        items=(
+            BatchItem(
+                target=MusicTrackTarget(bank_name="music.bnk", track_id=2000, source_index=0),
+                source=ExternalFileSource(file_path=custom_wav),
+                scope=ReplacementScope.OVERWRITE,
+            ),
+        ),
+    )
+    session.apply_batch(batch)
+
+    # Verify track updated to PCM
+    mod_track = next(o for o in bank.hirc.objects if isinstance(o, CAkMusicTrack) and o.id == 2000)
+    assert mod_track.sources[0].plugin_id == 0x00010001
+    assert (project.audio_dir / "88888.wem").is_file()
+
+    # Verify timeline updated
+    mod_seg = next(o for o in bank.hirc.objects if isinstance(o, CAkMusicSegment) and o.id == 1000)
+    assert mod_seg.duration != 5000.0
+    assert mod_seg.markers[1].position != 2500.0
+    assert bank.to_bytes() != orig_bytes
+
+    # Undo: exact bit-exact restoration
+    session.undo_mutation()
+    undone_bank = session.get_loaded_bank("music.bnk")
+    assert undone_bank is not None
+    assert undone_bank.to_bytes() == orig_bytes
+    restored_seg = next(
+        o for o in undone_bank.hirc.objects if isinstance(o, CAkMusicSegment) and o.id == 1000
+    )
+    assert restored_seg.duration == 5000.0
+    assert restored_seg.markers[1].position == 2500.0
+
+    # Redo: reapplies modification
+    session.redo_mutation()
+    redone_bank = session.get_loaded_bank("music.bnk")
+    assert redone_bank is not None
+    redone_track = next(
+        o for o in redone_bank.hirc.objects if isinstance(o, CAkMusicTrack) and o.id == 2000
+    )
+    assert redone_track.sources[0].plugin_id == 0x00010001
+    assert redone_bank.to_bytes() != orig_bytes
+
+
+def test_cross_bank_promotion_undo_redo_round_trip(tmp_path: Path):
+    """
+    Verifies that mutating media in music_data.bnk automatically discovers companion
+    music.bnk, promotes sibling CAkMusicTrack and CAkSound nodes, and undo restores both bit-exactly.
+    """
+    proj_dir = tmp_path / "CrossBankMod"
+    project = ProjectStorage.create_project(proj_dir, name="CrossBankMod", game=GameType.ATTILA)
+    session = WorkspaceSession(project=project)
+
+    shared_wem = 771122
+
+    # 1. music_data.bnk (holds media or sound)
+    data_sound = CAkSound(
+        id=101, source_id=shared_wem, file_id=shared_wem, stream_type=2, plugin_id=0x00040001
+    )
+    data_bank = SoundBank(
+        header=BkhdChunk(bank_id=10, version=112),
+        hirc=HircChunk(objects=[data_sound]),
+    )
+    orig_data_bytes = data_bank.to_bytes()
+    session.index_soundbank("music_data.bnk", data_bank)
+
+    # 2. companion music.bnk (holds CAkMusicTrack and CAkSound referencing shared_wem)
+    comp_track = CAkMusicTrack(
+        id=201,
+        sources=[
+            AkMusicTrackSource(
+                plugin_id=0x00040001, stream_type=2, source_id=shared_wem, file_id=shared_wem
+            )
+        ],
+        playlist=[AkTrackSrcInfo(track_id=201, source_id=shared_wem, src_duration=1000.0)],
+    )
+    comp_sound = CAkSound(
+        id=202, source_id=shared_wem, file_id=shared_wem, stream_type=2, plugin_id=0x00040001
+    )
+    comp_bank = SoundBank(
+        header=BkhdChunk(bank_id=20, version=112),
+        hirc=HircChunk(objects=[comp_track, comp_sound]),
+    )
+    orig_comp_bytes = comp_bank.to_bytes()
+    session.index_soundbank("music.bnk", comp_bank)
+
+    # Target music_data.bnk with media replacement
+    custom_wav = make_synthetic_wav(tmp_path / "companion.wav", duration_s=0.08)
+    batch = MutationBatch(
+        description="Replace data media",
+        items=(
+            BatchItem(
+                target=MediaNodeTarget(bank_name="music_data.bnk", wem_id=shared_wem),
+                source=ExternalFileSource(file_path=custom_wav),
+                scope=ReplacementScope.OVERWRITE,
+            ),
+        ),
+    )
+    session.apply_batch(batch)
+
+    # Verify both banks modified and nodes promoted to PCM
+    mod_comp = session.get_loaded_bank("music.bnk")
+    assert mod_comp is not None
+    m_track = next(o for o in mod_comp.hirc.objects if isinstance(o, CAkMusicTrack) and o.id == 201)
+    m_sound = next(o for o in mod_comp.hirc.objects if isinstance(o, CAkSound) and o.id == 202)
+    assert m_track.sources[0].plugin_id == 0x00010001
+    assert m_sound.plugin_id == 0x00010001
+    assert mod_comp.to_bytes() != orig_comp_bytes
+    assert (project.audio_dir / f"{shared_wem}.wem").is_file()
+
+    # Undo: both banks restored bit-exact and staged media reverted
+    session.undo_mutation()
+    undone_data = session.get_loaded_bank("music_data.bnk")
+    undone_comp = session.get_loaded_bank("music.bnk")
+    assert undone_data is not None and undone_comp is not None
+    assert undone_data.to_bytes() == orig_data_bytes
+    assert undone_comp.to_bytes() == orig_comp_bytes
+    u_track = next(
+        o for o in undone_comp.hirc.objects if isinstance(o, CAkMusicTrack) and o.id == 201
+    )
+    u_sound = next(o for o in undone_comp.hirc.objects if isinstance(o, CAkSound) and o.id == 202)
+    assert u_track.sources[0].plugin_id == 0x00040001
+    assert u_sound.plugin_id == 0x00040001
+    assert not (project.audio_dir / f"{shared_wem}.wem").is_file()
+
+    # Redo: companion bank re-promoted and staged media restored
+    session.redo_mutation()
+    redone_data = session.get_loaded_bank("music_data.bnk")
+    redone_comp = session.get_loaded_bank("music.bnk")
+    assert redone_data is not None and redone_comp is not None
+    r_track = next(
+        o for o in redone_comp.hirc.objects if isinstance(o, CAkMusicTrack) and o.id == 201
+    )
+    r_sound = next(o for o in redone_comp.hirc.objects if isinstance(o, CAkSound) and o.id == 202)
+    assert r_track.sources[0].plugin_id == 0x00010001
+    assert r_sound.plugin_id == 0x00010001
+    assert redone_comp.to_bytes() != orig_comp_bytes
+    assert (project.audio_dir / f"{shared_wem}.wem").is_file()

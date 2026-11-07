@@ -233,3 +233,63 @@ def test_container_view_renders_ran_seq_semantics(qapp: QApplication):
 
     cntr_v.routing_table.cellDoubleClicked.emit(0, 0)
     assert jump_key == "hirc:101"
+
+
+def test_music_view_audio_references_and_export(qapp: QApplication) -> None:
+    music_v = MusicInspectorView()
+    jump_keys: list[str] = []
+    export_ids: list[int] = []
+    music_v.jump_requested.connect(jump_keys.append)
+    music_v.export_requested.connect(export_ids.append)
+
+    details = NodeInspectorDetails(
+        node_key="hirc:786167055:src:0",
+        name="Sub-track 1 (WEM: 798502136)",
+        object_type="MusicTrack",
+        view_type=InspectorViewType.MUSIC,
+        object_id=786167055,
+        hex_id="0x2EDE05AF",
+        properties=(
+            InspectorProperty(category="Music", label="Source WEM ID", value="798502136"),
+            InspectorProperty(category="Music", label="Duration (ms)", value="8336.6"),
+        ),
+        parent_references=(
+            NodeReferenceSummary(
+                key="hirc:786167055",
+                label="MusicTrack_786167055",
+                id_str="786167055",
+                type_str="MusicTrack",
+            ),
+        ),
+        audio_references=(
+            NodeReferenceSummary(
+                key="hirc:786167055",
+                label="MusicTrack_786167055",
+                id_str="786167055",
+                type_str="MusicTrack",
+                bank_name="global_music.bnk",
+            ),
+        ),
+        audio_reference_count=1,
+        source_wem_id=798502136,
+    )
+
+    music_v.render(details)
+    assert music_v.btn_export.isEnabled() is True
+    assert music_v.ref_table.rowCount() == 1
+    assert "786167055" in music_v.ref_table.item(0, 1).text()
+    assert "8336.6 ms" in music_v.lbl_duration.text()
+
+    # Double click on audio ref table
+    music_v.ref_table.cellDoubleClicked.emit(0, 0)
+    assert len(jump_keys) == 1
+    assert "786167055" in jump_keys[0]
+
+    # Click export
+    music_v.btn_export.click()
+    assert export_ids == [786167055]
+
+    # Reset
+    music_v.render(None)
+    assert music_v.btn_export.isEnabled() is False
+    assert music_v.ref_table.rowCount() == 0

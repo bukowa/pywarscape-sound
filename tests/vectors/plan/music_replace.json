@@ -1,0 +1,54 @@
+[
+  {
+    "name": "music_track_replace_overwrite_single",
+    "target": {
+      "type": "MusicTrackTarget",
+      "bank_name": "global_music.bnk",
+      "track_id": 10001,
+      "source_index": 0
+    },
+    "source": {
+      "type": "ExternalFileSource",
+      "file_path": "source_audio/custom_music.wav"
+    },
+    "scope": "overwrite",
+    "forked_wem_id": null,
+    "expected_result": {
+      "status": "plan",
+      "description": "Replace MusicTrack 10001 source 0 with external file custom_music.wav (WEM 20001)",
+      "num_effects": 4,
+      "effect_types": [
+        "StageMasterAudioIntent",
+        "UpdateMusicTrackNodeIntent",
+        "SyncMusicTimelineIntent",
+        "MarkBankModifiedIntent"
+      ]
+    }
+  },
+  {
+    "name": "music_track_replace_isolate_subtrack",
+    "target": {
+      "type": "MusicTrackTarget",
+      "bank_name": "global_music.bnk",
+      "track_id": 10002,
+      "source_index": 1
+    },
+    "source": {
+      "type": "ExternalFileSource",
+      "file_path": "source_audio/custom_layer.wav"
+    },
+    "scope": "isolate",
+    "forked_wem_id": 777888,
+    "expected_result": {
+      "status": "plan",
+      "description": "Isolate and replace MusicTrack 10002 source 1 with external file custom_layer.wav (forked WEM 777888)",
+      "num_effects": 4,
+      "effect_types": [
+        "StageMasterAudioIntent",
+        "UpdateMusicTrackNodeIntent",
+        "SyncMusicTimelineIntent",
+        "MarkBankModifiedIntent"
+      ]
+    }
+  }
+]

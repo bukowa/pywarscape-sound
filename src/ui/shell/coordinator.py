@@ -3,13 +3,19 @@
 from __future__ import annotations
 
 import threading
+from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
 from src.engine.ontology import (
+    BatchItem,
     MediaNodeTarget,
     MusicTrackTarget,
     MutationBatch,
     MutationTarget,
+    ReplacementScope,
+    SilentStubSource,
     SoundNodeTarget,
 )
 from src.models import AudioCatalogEntry
@@ -25,6 +31,7 @@ from src.ui.features.audio_transport.structs import (
 from src.ui.features.bank_viewer.audio_resolver import resolve_catalog_entry_audio_track
 from src.ui.features.bank_viewer.state import BankViewerState
 from src.ui.features.bank_viewer.store import BankViewerStore
+from src.ui.features.blast_radius.store import check_replacement_branch
 from src.ui.shell.state import ScreenMode, ShellState
 from src.ui.shell.store import ShellStore
 from src.workspace.project import AudioProject
@@ -41,6 +48,8 @@ class WorkspaceCoordinator:
         audio_sources_store: AudioSourcesStore | None = None,
         audio_sources_transport_store: AudioTransportStore | None = None,
         async_preview: bool = True,
+        confirm_replacement_scope: Callable[[MutationTarget], tuple[bool, ReplacementScope]]
+        | None = None,
     ) -> None:
         self.shell_store = shell_store
         self.bank_viewer_store = bank_viewer_store
@@ -48,6 +57,7 @@ class WorkspaceCoordinator:
         self.audio_sources_store = audio_sources_store
         self.audio_sources_transport_store = audio_sources_transport_store or transport_store
         self.async_preview = async_preview
+        self.confirm_replacement_scope = confirm_replacement_scope
 
         self._active_project: AudioProject | None = None
         self._last_selected_bank_name: str | None = None
@@ -154,6 +164,80 @@ class WorkspaceCoordinator:
             targets = self._resolve_targets_from_selection(bv_state)
             self.audio_sources_store.set_targets(targets)
 
+    def _find_parent_segment_id(self, bank_name: str, track_id: int) -> int | None:
+        """Finds the parent CAkMusicSegment ID for a CAkMusicTrack using BankGraphIndex and bank AST."""
+        entry = self.bank_viewer_store.session.get_loaded_entry(bank_name)
+        if entry is None:
+            return None
+        bank, graph_index, _ = entry
+
+        # 1. Query graph_index parent mapping
+        parents: list[Any] = []
+        get_parents_fn = getattr(graph_index, "get_parents", None)
+        if callable(get_parents_fn):
+            parents = get_parents_fn(track_id)
+        elif hasattr(graph_index, "get_parent_ids"):
+            parents = graph_index.get_parent_ids(track_id)
+        elif hasattr(graph_index, "parent_map"):
+            parents = graph_index.parent_map.get(track_id, [])
+
+        for p in parents:
+            if isinstance(p, int):
+                p_obj = graph_index.objects_by_id.get(p)
+                if p_obj is None and bank.hirc is not None:
+                    for obj in bank.hirc.objects:
+                        if obj.id == p:
+                            p_obj = obj
+                            break
+                if p_obj is not None:
+                    if (
+                        getattr(p_obj, "obj_type", None) == 10
+                        or p_obj.__class__.__name__ == "CAkMusicSegment"
+                    ):
+                        return p
+            else:
+                if getattr(p, "obj_type", None) == 10 or p.__class__.__name__ == "CAkMusicSegment":
+                    return getattr(p, "id", None)
+
+        # 2. Fallback: inspect bank.hirc.objects directly if graph_index didn't find segment
+        if bank.hirc is not None:
+            for obj in bank.hirc.objects:
+                if (
+                    getattr(obj, "obj_type", None) == 10
+                    or obj.__class__.__name__ == "CAkMusicSegment"
+                ):
+                    child_ids = getattr(obj, "child_ids", None) or []
+                    if track_id in child_ids:
+                        return obj.id
+
+        return None
+
+    def _is_music_track(self, bank_name: str, hirc_id: int, node: Any | None) -> bool:
+        """Determines if a HIRC ID corresponds to a CAkMusicTrack."""
+        if node is not None:
+            return node.type_str in ("MusicTrack", "MusicTrackSource", "SubTrack")
+
+        entry = self.bank_viewer_store.session.get_loaded_entry(bank_name)
+        bank = entry[0] if entry is not None else self.bank_viewer_store.get_loaded_bank(bank_name)
+        if bank is not None:
+            obj: Any = None
+            if entry is not None:
+                graph_index = entry[1]
+                obj = graph_index.objects_by_id.get(hirc_id)
+            if obj is None and bank.hirc is not None:
+                for o in bank.hirc.objects:
+                    if o.id == hirc_id:
+                        obj = o
+                        break
+            if obj is not None:
+                return (
+                    getattr(obj, "obj_type", None) == 11
+                    or obj.__class__.__name__ == "CAkMusicTrack"
+                )
+            return False
+
+        return False
+
     def _resolve_targets_from_selection(
         self, bv_state: BankViewerState
     ) -> tuple[MutationTarget, ...]:
@@ -175,14 +259,49 @@ class WorkspaceCoordinator:
                 except ValueError:
                     pass
             elif key.startswith("hirc:"):
+                # Sub-track node syntax: "hirc:<track_id>:src:<source_index>"
+                parts = key.split(":")
+                if len(parts) == 4 and parts[2] == "src":
+                    try:
+                        track_id = int(parts[1])
+                        source_index = int(parts[3])
+                    except ValueError:
+                        continue
+
+                    node = bv_state.nodes_by_key.get(key) or bv_state.nodes_by_key.get(
+                        f"hirc:{track_id}"
+                    )
+                    if not self._is_music_track(bank_name, track_id, node):
+                        continue
+
+                    parent_seg_id = self._find_parent_segment_id(bank_name, track_id)
+                    targets.append(
+                        MusicTrackTarget(
+                            bank_name=bank_name,
+                            track_id=track_id,
+                            parent_segment_id=parent_seg_id,
+                            source_index=source_index,
+                        )
+                    )
+                    continue
+
+                # Standard HIRC node syntax: "hirc:<id>"
                 node = bv_state.nodes_by_key.get(key)
                 if node is not None and node.type_str not in ("Sound", "MusicTrack"):
                     continue
                 try:
                     raw_id = node.id_str if (node and node.id_str) else key.removeprefix("hirc:")
                     hirc_id = int(raw_id)
-                    if node and node.type_str == "MusicTrack":
-                        targets.append(MusicTrackTarget(bank_name=bank_name, track_id=hirc_id))
+                    if self._is_music_track(bank_name, hirc_id, node):
+                        parent_seg_id = self._find_parent_segment_id(bank_name, hirc_id)
+                        targets.append(
+                            MusicTrackTarget(
+                                bank_name=bank_name,
+                                track_id=hirc_id,
+                                parent_segment_id=parent_seg_id,
+                                source_index=0,
+                            )
+                        )
                     else:
                         targets.append(SoundNodeTarget(bank_name=bank_name, sound_id=hirc_id))
                 except ValueError:
@@ -197,6 +316,30 @@ class WorkspaceCoordinator:
         sel_bank = self.bank_viewer_store.state.selected_bank_name
         sel_key = self.bank_viewer_store.state.selected_node_key
         sel_keys = self.bank_viewer_store.state.selected_node_keys
+
+        if self.confirm_replacement_scope is not None or self.async_preview:
+            confirm_fn = self.confirm_replacement_scope or (
+                lambda target: check_replacement_branch(
+                    session,
+                    target.bank_name,
+                    target,
+                    prompt_on_embedded_unshared=False,
+                )
+            )
+            updated_items: list[BatchItem] = []
+            for item in batch.items:
+                if isinstance(item.target, (SoundNodeTarget, MusicTrackTarget)) and not isinstance(
+                    item.source, SilentStubSource
+                ):
+                    proceed, chosen_scope = confirm_fn(item.target)
+                    if not proceed:
+                        continue
+                    item = replace(item, scope=chosen_scope)
+                updated_items.append(item)
+
+            if not updated_items and bool(batch.items):
+                return
+            batch = replace(batch, items=tuple(updated_items))
 
         outcome = session.apply_batch(batch)
         if self.audio_sources_store is not None:

@@ -153,6 +153,7 @@ class InspectorPanel(QWidget):
 
         self.sound_view.reference_media_requested.connect(self.reference_media_requested)
         self.sound_view.export_requested.connect(self.export_sound_requested)
+        self.music_view.export_requested.connect(self.export_sound_requested)
 
         self.media_view.export_requested.connect(self.export_media_requested)
         self.media_view.revert_requested.connect(self.revert_media_requested)

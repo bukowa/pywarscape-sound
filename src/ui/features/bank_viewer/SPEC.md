@@ -3,7 +3,7 @@ SoundBank exploration and HIRC hierarchy inspection feature slice.
 Provides full AST visualization, navigation history, property inspection, and direct node audio replacement.
 - `__main__.py`: Standalone developer harness and CLI runner for previewing the SoundBank Viewer.
 - `audio_resolver.py`: Resolves playable `AudioTrack` items from SoundBank HIRC nodes and embedded DIDX entries.
-- `bank_list_panel.py`: `BankListPanel` displaying available vanilla and modified project SoundBanks.
+- `bank_list_panel.py`: `BankListPanel` displaying available vanilla and modified project SoundBanks grouped by parent category or flat table.
 - `builder.py`: Projections mapping SoundBank AST and graph index into `HircTreeNode` hierarchies and property sheets.
 - `causation.py`: Pure state transitions (`reconcile_viewer`) handling selection, tree filtering, lazy WEM header metadata, and back/forward navigation.
 - `columns.py`: Configurable hierarchy tree columns, widths, and cell/provenance extractors (`ColumnSpec`, `TreeColumn`, `WEM_HEADER_COLUMNS`, `requires_wem_metadata`, `toggle_visible_columns`).
@@ -17,5 +17,5 @@ Provides full AST visualization, navigation history, property inspection, and di
 - `views/event_action_view.py`: `EventActionInspectorView` displaying event action targets and delays.
 - `views/game_entities_widget.py`: `GameEntitiesWidget` collapsible inspector section and `GameEntitiesTableModel` virtual table for game database entity rosters.
 - `views/media_view.py`: `MediaInspectorView` displaying embedded DIDX WEM media details, cross-bank references, and export controls.
-- `views/music_view.py`: `MusicInspectorView` presenting interactive music playlists, segments, and track markers.
+- `views/music_view.py`: `MusicInspectorView` presenting interactive music playlists, segments, track markers, audio references, and WAV export.
 - `views/sound_view.py`: `SoundInspectorView` displaying sound node playback types, streamed/embedded indicators, cross-bank WEM references, and export controls.

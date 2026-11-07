@@ -1,5 +1,6 @@
 """Pre-indexed bidirectional HIRC item relationship lookups and root resolution."""
 
+import struct
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
@@ -87,19 +88,53 @@ def get_child_ids_for_object(obj: HircObject | None) -> list[int]:
     elif isinstance(obj, (CAkActorMixer, CAkLayerCntr)):
         children.extend(obj.children)
     elif isinstance(obj, CAkMusicSwitchCntr):
-        children.extend(getattr(obj, "child_ids", []))
-        if hasattr(obj, "tree") and obj.tree:
+        tp = getattr(obj, "trans_params", None)
+        if tp and hasattr(tp, "children"):
+            for cid in tp.children:
+                if cid not in children:
+                    children.append(cid)
+        for cid in getattr(obj, "child_ids", []):
+            if cid not in children:
+                children.append(cid)
+        if getattr(obj, "tree", None):
             for leaf in obj.tree.get_all_leaf_audio_node_ids():
                 if leaf not in children:
                     children.append(leaf)
+        if tp and hasattr(tp, "rules"):
+            for rule in tp.rules:
+                if (
+                    getattr(rule, "alloc_trans_object_flag", 0) != 0
+                    and len(getattr(rule, "trans_object", b"")) >= 4
+                ):
+                    trans_seg_id = struct.unpack_from("<I", rule.trans_object, 0)[0]
+                    if trans_seg_id > 0 and trans_seg_id not in children:
+                        children.append(trans_seg_id)
     elif isinstance(obj, CAkMusicRanSeqCntr):
-        if hasattr(obj, "playlist") and obj.playlist:
+        tp = getattr(obj, "trans_params", None)
+        if tp and hasattr(tp, "children"):
+            for cid in tp.children:
+                if cid not in children:
+                    children.append(cid)
+        for cid in getattr(obj, "child_ids", []):
+            if cid not in children:
+                children.append(cid)
+        if getattr(obj, "playlist", None):
             for pitem in obj.playlist:
                 sid = getattr(pitem, "segment_id", 0)
-                pid = getattr(pitem, "play_id", 0)
-                target = sid if sid > 0 else pid
-                if target > 0 and target not in children:
-                    children.append(target)
+                pid = getattr(pitem, "playlist_item_id", 0) or getattr(pitem, "play_id", 0)
+                if sid > 0 and sid not in children:
+                    children.append(sid)
+                if pid > 0 and pid not in children:
+                    children.append(pid)
+        if tp and hasattr(tp, "rules"):
+            for rule in tp.rules:
+                if (
+                    getattr(rule, "alloc_trans_object_flag", 0) != 0
+                    and len(getattr(rule, "trans_object", b"")) >= 4
+                ):
+                    trans_seg_id = struct.unpack_from("<I", rule.trans_object, 0)[0]
+                    if trans_seg_id > 0 and trans_seg_id not in children:
+                        children.append(trans_seg_id)
     return children
 
 

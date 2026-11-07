@@ -5,24 +5,33 @@ Dispatches effect intents to disk I/O, audio conversion, and AST mutations.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Any, assert_never
 
 from src.bnk.models import CAkSound
-from src.bnk.wem import build_silent_pcm_wem_bytes
+from src.bnk.wem import WemFormatTag, build_silent_pcm_wem_bytes, parse_wem_header
 from src.compiler.converter import AudioConverter
 from src.engine.ontology import (
     AppendVariationIntent,
     AudioMutationPlan,
     CopyMediaBytesIntent,
+    ExternalFileSource,
     MarkBankModifiedIntent,
     StageLooseWemIntent,
     StageMasterAudioIntent,
     SyncMusicTimelineIntent,
+    UpdateMusicTrackNodeIntent,
     UpdateSoundNodeIntent,
 )
-from src.engine.planner import find_sound_in_bank
+from src.engine.planner import (
+    find_music_track_in_bank,
+    find_parent_segment_in_bank,
+    find_sound_in_bank,
+)
 from src.engine.ports import AudioProjectPort
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -46,6 +55,8 @@ def execute_mutation_plan(
     Processes file staging, audio conversion, HIRC AST mutations, and manifest updates.
     """
     errors: list[str] = []
+    staged_durations_ms: dict[int, float] = {}
+    staged_plugin_ids: dict[int, int] = {}
 
     try:
         for intent in plan.effects:
@@ -54,16 +65,56 @@ def execute_mutation_plan(
                     # 1. Stage master uncompressed audio in source_audio/
                     project.stage_source_audio(src_path=intent.source_path, wem_id=intent.wem_id)
 
-                    # 2. Convert audio to 32kHz Mono Vorbis/PCM WEM and stage in pack_root/audio/
-                    wem_bytes, _ = AudioConverter.convert_to_wem_bytes(
+                    # 2. Convert audio to Vorbis/PCM WEM and stage in pack_root/audio/
+                    target_rate = (
+                        plan.source.target_sample_rate
+                        if isinstance(plan.source, ExternalFileSource)
+                        else None
+                    )
+                    target_ch = (
+                        plan.source.target_channels
+                        if isinstance(plan.source, ExternalFileSource)
+                        else None
+                    )
+
+                    wem_bytes, dur = AudioConverter.convert_to_wem_bytes(
                         input_source=intent.source_path,
-                        target_sample_rate=32000,
-                        target_channels=1,
+                        sample_rate=target_rate,
+                        channels=target_ch,
                     )
                     project.stage_wem(wem_id=intent.wem_id, data=wem_bytes)
+                    staged_durations_ms[intent.wem_id] = dur
+                    try:
+                        hdr = parse_wem_header(wem_bytes)
+                        pl_id = 0x00040001 if hdr.format_tag == WemFormatTag.VORBIS else 0x00010001
+                    except Exception:
+                        pl_id = 0x00010001
+                    staged_plugin_ids[intent.wem_id] = pl_id
 
                 case StageLooseWemIntent():
                     project.stage_wem(wem_id=intent.wem_id, data=intent.wem_bytes)
+                    dur = 50.0
+                    pl_id = 0x00010001
+                    try:
+                        hdr = parse_wem_header(intent.wem_bytes)
+                        dur = (
+                            float(hdr.duration_ms)
+                            if hdr.duration_ms > 0
+                            else (
+                                (hdr.data_size / hdr.avg_bytes_per_sec * 1000.0)
+                                if hdr.avg_bytes_per_sec > 0
+                                else 50.0
+                            )
+                        )
+                        pl_id = 0x00040001 if hdr.format_tag == WemFormatTag.VORBIS else 0x00010001
+                    except Exception:
+                        logger.debug(
+                            "Failed to extract WEM header metadata for staged WEM %s",
+                            intent.wem_id,
+                            exc_info=True,
+                        )
+                    staged_durations_ms[intent.wem_id] = dur
+                    staged_plugin_ids[intent.wem_id] = pl_id
 
                 case UpdateSoundNodeIntent():
                     sound = find_sound_in_bank(bank, intent.sound_id)
@@ -73,6 +124,9 @@ def execute_mutation_plan(
                         sound.file_id = intent.new_file_id
                         sound.file_offset = 0
                         sound.in_memory_media_size = 0
+                        sound.plugin_id = staged_plugin_ids.get(
+                            intent.new_source_id, intent.new_plugin_id
+                        )
 
                     # Ensure silent 1.wem stub exists on disk if muting
                     if intent.new_source_id == 1:
@@ -83,6 +137,39 @@ def execute_mutation_plan(
                             )
                             project.stage_wem(1, silent_bytes)
 
+                case UpdateMusicTrackNodeIntent():
+                    track = find_music_track_in_bank(bank, intent.track_id)
+                    if track is not None and 0 <= intent.source_index < len(track.sources):
+                        src = track.sources[intent.source_index]
+                        old_source_id = src.source_id
+                        src.plugin_id = staged_plugin_ids.get(
+                            intent.new_source_id, intent.new_plugin_id
+                        )
+                        src.stream_type = intent.new_stream_type
+                        src.source_id = intent.new_source_id
+                        src.file_id = intent.new_file_id
+                        src.file_offset = None if intent.new_stream_type == 2 else 0
+                        src.in_memory_media_size = 0
+
+                        # Update track.playlist clips
+                        if len(track.sources) == 1:
+                            for clip in track.playlist:
+                                clip.source_id = intent.new_source_id
+                        else:
+                            if (
+                                intent.source_index < len(track.playlist)
+                                and track.playlist[intent.source_index].source_id == old_source_id
+                            ):
+                                track.playlist[intent.source_index].source_id = intent.new_source_id
+                            else:
+                                for clip in track.playlist:
+                                    if clip.source_id == old_source_id:
+                                        clip.source_id = intent.new_source_id
+                    else:
+                        errors.append(
+                            f"MusicTrack {intent.track_id} source {intent.source_index} not found in bank"
+                        )
+
                 case CopyMediaBytesIntent():
                     raw_bytes = None
                     if resolver is not None and hasattr(resolver, "resolve_wem_bytes"):
@@ -91,6 +178,30 @@ def execute_mutation_plan(
                         raw_bytes = bank.get_media_data(intent.source_wem_id)
                     if raw_bytes is not None:
                         project.stage_wem(wem_id=intent.target_wem_id, data=raw_bytes)
+                        dur = 0.0
+                        pl_id = 0x00010001
+                        try:
+                            hdr = parse_wem_header(raw_bytes)
+                            dur = (
+                                float(hdr.duration_ms)
+                                if hdr.duration_ms > 0
+                                else (
+                                    (hdr.data_size / hdr.avg_bytes_per_sec * 1000.0)
+                                    if hdr.avg_bytes_per_sec > 0
+                                    else 0.0
+                                )
+                            )
+                            pl_id = (
+                                0x00040001 if hdr.format_tag == WemFormatTag.VORBIS else 0x00010001
+                            )
+                        except Exception:
+                            logger.debug(
+                                "Failed to extract WEM header metadata for copied WEM %s",
+                                intent.target_wem_id,
+                                exc_info=True,
+                            )
+                        staged_durations_ms[intent.target_wem_id] = dur
+                        staged_plugin_ids[intent.target_wem_id] = pl_id
                     else:
                         errors.append(
                             f"Could not resolve source media bytes for WEM {intent.source_wem_id}"
@@ -115,9 +226,73 @@ def execute_mutation_plan(
                             project.manifest.save(project.manifest_path)
 
                 case SyncMusicTimelineIntent():
-                    errors.append(
-                        f"Effect intent SyncMusicTimelineIntent not yet supported: {intent}"
+                    track = find_music_track_in_bank(bank, intent.track_id)
+                    duration_ms = intent.new_duration_ms
+                    if (
+                        duration_ms <= 0.0
+                        and track
+                        and 0 <= intent.source_index < len(track.sources)
+                    ):
+                        wem_id = track.sources[intent.source_index].source_id
+                        duration_ms = staged_durations_ms.get(wem_id, 0.0)
+                    if duration_ms <= 0.0:
+                        duration_ms = 50.0
+
+                    if track is not None:
+                        if len(track.sources) == 1:
+                            for clip in track.playlist:
+                                clip.play_at = 0.0
+                                clip.begin_trim_offset = 0.0
+                                clip.end_trim_offset = 0.0
+                                clip.src_duration = duration_ms
+                        else:
+                            if intent.source_index < len(track.playlist):
+                                clip = track.playlist[intent.source_index]
+                                clip.play_at = 0.0
+                                clip.begin_trim_offset = 0.0
+                                clip.end_trim_offset = 0.0
+                                clip.src_duration = duration_ms
+
+                    parent_seg = find_parent_segment_in_bank(
+                        bank, intent.track_id, intent.parent_segment_id
                     )
+                    if parent_seg is not None:
+                        if track is not None and len(track.sources) > 1:
+                            new_seg_ms = max(
+                                (
+                                    c.src_duration + c.end_trim_offset - c.begin_trim_offset
+                                    for c in track.playlist
+                                ),
+                                default=duration_ms,
+                            )
+                        else:
+                            new_seg_ms = duration_ms
+
+                        if len(parent_seg.markers) >= 2:
+                            entry_old = parent_seg.markers[0].position
+                            exit_old = parent_seg.markers[-1].position
+                            old_span = exit_old - entry_old
+                            parent_seg.markers[0].position = 0.0
+                            if len(parent_seg.markers) > 2:
+                                for m in parent_seg.markers[1:-1]:
+                                    if old_span > 0.0:
+                                        ratio = max(
+                                            0.0, min(1.0, (m.position - entry_old) / old_span)
+                                        )
+                                        m.position = ratio * new_seg_ms
+                                    elif parent_seg.duration > 0.0:
+                                        ratio = max(0.0, min(1.0, m.position / parent_seg.duration))
+                                        m.position = ratio * new_seg_ms
+                                    else:
+                                        m.position = min(m.position, new_seg_ms)
+                                parent_seg.markers[1:-1] = sorted(
+                                    parent_seg.markers[1:-1], key=lambda x: x.position
+                                )
+                            parent_seg.markers[-1].position = new_seg_ms
+                        elif len(parent_seg.markers) == 1:
+                            parent_seg.markers[0].position = 0.0
+
+                        parent_seg.duration = new_seg_ms
 
                 case AppendVariationIntent():
                     errors.append(

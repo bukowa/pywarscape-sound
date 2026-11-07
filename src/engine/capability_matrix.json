@@ -1,0 +1,301 @@
+{
+  "actions": [
+    "listen",
+    "see_plays_when",
+    "see_shared_references",
+    "see_duration",
+    "export_wav",
+    "replace",
+    "mute",
+    "enhance",
+    "edit_volume_pitch",
+    "add_variation"
+  ],
+  "node_types": {
+    "Sound": {
+      "listen": {"status": "supported", "reason": ""},
+      "see_plays_when": {"status": "supported", "reason": ""},
+      "see_shared_references": {"status": "supported", "reason": ""},
+      "see_duration": {"status": "supported", "reason": ""},
+      "export_wav": {"status": "supported", "reason": ""},
+      "replace": {"status": "supported", "reason": ""},
+      "mute": {"status": "supported", "reason": ""},
+      "enhance": {"status": "supported", "reason": ""},
+      "edit_volume_pitch": {"status": "disabled", "reason": "Direct volume and pitch property editing on Sound nodes is planned for a future release."},
+      "add_variation": {"status": "disabled", "reason": "Sound nodes are leaf audio sources; add variations to a parent Random/Sequence Container instead."}
+    },
+    "MusicTrack": {
+      "listen": {"status": "supported", "reason": ""},
+      "see_plays_when": {"status": "supported", "reason": ""},
+      "see_shared_references": {"status": "supported", "reason": ""},
+      "see_duration": {"status": "supported", "reason": ""},
+      "export_wav": {"status": "supported", "reason": ""},
+      "replace": {"status": "supported", "reason": ""},
+      "mute": {"status": "supported", "reason": ""},
+      "enhance": {"status": "supported", "reason": ""},
+      "edit_volume_pitch": {"status": "disabled", "reason": "Direct volume and pitch property editing on Music Track nodes is planned for a future release."},
+      "add_variation": {"status": "disabled", "reason": "Adding sub-track variations to Music Track nodes is not yet supported."}
+    },
+    "Media": {
+      "listen": {"status": "supported", "reason": ""},
+      "see_plays_when": {"status": "disabled", "reason": "Embedded recording rows do not have direct trigger conditions; select a referencing Sound Slot instead."},
+      "see_shared_references": {"status": "supported", "reason": ""},
+      "see_duration": {"status": "supported", "reason": ""},
+      "export_wav": {"status": "supported", "reason": ""},
+      "replace": {"status": "supported", "reason": ""},
+      "mute": {"status": "supported", "reason": ""},
+      "enhance": {"status": "supported", "reason": ""},
+      "edit_volume_pitch": {"status": "disabled", "reason": "Embedded recording rows do not have per-slot volume or variations; select a Sound Slot instead."},
+      "add_variation": {"status": "disabled", "reason": "Embedded recording rows do not have per-slot volume or variations; select a Sound Slot instead."}
+    },
+    "RanSeqCntr": {
+      "listen": {"status": "disabled", "reason": "Select a playable Sound Slot or Music Track child node to perform this action."},
+      "see_plays_when": {"status": "supported", "reason": ""},
+      "see_shared_references": {"status": "disabled", "reason": "Shared recording references only apply to playable audio source nodes."},
+      "see_duration": {"status": "disabled", "reason": "Containers do not have a single fixed duration."},
+      "export_wav": {"status": "disabled", "reason": "Select a playable Sound Slot or Music Track child node to perform this action."},
+      "replace": {"status": "disabled", "reason": "Select a playable Sound Slot or Music Track child node to perform this action."},
+      "mute": {"status": "disabled", "reason": "Select a playable Sound Slot or Music Track child node to perform this action."},
+      "enhance": {"status": "disabled", "reason": "Select a playable Sound Slot or Music Track child node to perform this action."},
+      "edit_volume_pitch": {"status": "disabled", "reason": "Container-level volume and pitch editing is planned for a future release."},
+      "add_variation": {"status": "disabled", "reason": "Adding playlist variations to containers is planned for a future release."}
+    },
+    "SwitchCntr": {
+      "listen": {"status": "disabled", "reason": "Select a playable Sound Slot or Music Track child node to perform this action."},
+      "see_plays_when": {"status": "supported", "reason": ""},
+      "see_shared_references": {"status": "disabled", "reason": "Shared recording references only apply to playable audio source nodes."},
+      "see_duration": {"status": "disabled", "reason": "Containers do not have a single fixed duration."},
+      "export_wav": {"status": "disabled", "reason": "Select a playable Sound Slot or Music Track child node to perform this action."},
+      "replace": {"status": "disabled", "reason": "Select a playable Sound Slot or Music Track child node to perform this action."},
+      "mute": {"status": "disabled", "reason": "Select a playable Sound Slot or Music Track child node to perform this action."},
+      "enhance": {"status": "disabled", "reason": "Select a playable Sound Slot or Music Track child node to perform this action."},
+      "edit_volume_pitch": {"status": "disabled", "reason": "Container-level volume and pitch editing is planned for a future release."},
+      "add_variation": {"status": "disabled", "reason": "Adding switch branches to containers is planned for a future release."}
+    },
+    "LayerCntr": {
+      "listen": {"status": "disabled", "reason": "Select a playable Sound Slot or Music Track child node to perform this action."},
+      "see_plays_when": {"status": "disabled", "reason": "Select a playable Sound Slot or Music Track child node to view play conditions."},
+      "see_shared_references": {"status": "disabled", "reason": "Shared recording references only apply to playable audio source nodes."},
+      "see_duration": {"status": "disabled", "reason": "Containers do not have a single fixed duration."},
+      "export_wav": {"status": "disabled", "reason": "Select a playable Sound Slot or Music Track child node to perform this action."},
+      "replace": {"status": "disabled", "reason": "Select a playable Sound Slot or Music Track child node to perform this action."},
+      "mute": {"status": "disabled", "reason": "Select a playable Sound Slot or Music Track child node to perform this action."},
+      "enhance": {"status": "disabled", "reason": "Select a playable Sound Slot or Music Track child node to perform this action."},
+      "edit_volume_pitch": {"status": "disabled", "reason": "Container-level volume and pitch editing is planned for a future release."},
+      "add_variation": {"status": "disabled", "reason": "Layer containers do not support direct variation additions."}
+    },
+    "MusicSwitchCntr": {
+      "listen": {"status": "disabled", "reason": "Select a playable Sound Slot or Music Track child node to perform this action."},
+      "see_plays_when": {"status": "disabled", "reason": "Music container play condition resolution is not yet implemented."},
+      "see_shared_references": {"status": "disabled", "reason": "Shared recording references only apply to playable audio source nodes."},
+      "see_duration": {"status": "disabled", "reason": "Music containers do not have a single fixed duration."},
+      "export_wav": {"status": "disabled", "reason": "Select a playable Sound Slot or Music Track child node to perform this action."},
+      "replace": {"status": "disabled", "reason": "Select a playable Sound Slot or Music Track child node to perform this action."},
+      "mute": {"status": "disabled", "reason": "Select a playable Sound Slot or Music Track child node to perform this action."},
+      "enhance": {"status": "disabled", "reason": "Select a playable Sound Slot or Music Track child node to perform this action."},
+      "edit_volume_pitch": {"status": "disabled", "reason": "Container-level volume and pitch editing is planned for a future release."},
+      "add_variation": {"status": "disabled", "reason": "Adding playlist variations to music containers is planned for a future release."}
+    },
+    "MusicRanSeqCntr": {
+      "listen": {"status": "disabled", "reason": "Select a playable Sound Slot or Music Track child node to perform this action."},
+      "see_plays_when": {"status": "disabled", "reason": "Music container play condition resolution is not yet implemented."},
+      "see_shared_references": {"status": "disabled", "reason": "Shared recording references only apply to playable audio source nodes."},
+      "see_duration": {"status": "disabled", "reason": "Music containers do not have a single fixed duration."},
+      "export_wav": {"status": "disabled", "reason": "Select a playable Sound Slot or Music Track child node to perform this action."},
+      "replace": {"status": "disabled", "reason": "Select a playable Sound Slot or Music Track child node to perform this action."},
+      "mute": {"status": "disabled", "reason": "Select a playable Sound Slot or Music Track child node to perform this action."},
+      "enhance": {"status": "disabled", "reason": "Select a playable Sound Slot or Music Track child node to perform this action."},
+      "edit_volume_pitch": {"status": "disabled", "reason": "Container-level volume and pitch editing is planned for a future release."},
+      "add_variation": {"status": "disabled", "reason": "Adding playlist variations to music containers is planned for a future release."}
+    },
+    "MusicSegment": {
+      "listen": {"status": "disabled", "reason": "Select a playable Sound Slot or Music Track child node to perform this action."},
+      "see_plays_when": {"status": "disabled", "reason": "Music segment play condition resolution is not yet implemented."},
+      "see_shared_references": {"status": "disabled", "reason": "Shared recording references only apply to playable audio source nodes."},
+      "see_duration": {"status": "disabled", "reason": "Music segment duration inspection is planned for a future release."},
+      "export_wav": {"status": "disabled", "reason": "Select a playable Sound Slot or Music Track child node to perform this action."},
+      "replace": {"status": "disabled", "reason": "Select a playable Sound Slot or Music Track child node to perform this action."},
+      "mute": {"status": "disabled", "reason": "Select a playable Sound Slot or Music Track child node to perform this action."},
+      "enhance": {"status": "disabled", "reason": "Select a playable Sound Slot or Music Track child node to perform this action."},
+      "edit_volume_pitch": {"status": "disabled", "reason": "Music segments do not contain direct volume or pitch properties."},
+      "add_variation": {"status": "disabled", "reason": "Music segments contain tracks rather than variation lists."}
+    },
+    "Event": {
+      "listen": {"status": "disabled", "reason": "Select a playable Sound Slot or Music Track child node to perform this action."},
+      "see_plays_when": {"status": "supported", "reason": ""},
+      "see_shared_references": {"status": "disabled", "reason": "Shared recording references only apply to playable audio source nodes."},
+      "see_duration": {"status": "disabled", "reason": "Event triggers do not have a fixed single clip duration."},
+      "export_wav": {"status": "disabled", "reason": "Select a playable Sound Slot or Music Track child node to perform this action."},
+      "replace": {"status": "disabled", "reason": "Select a playable Sound Slot or Music Track child node to perform this action."},
+      "mute": {"status": "disabled", "reason": "Select a playable Sound Slot or Music Track child node to perform this action."},
+      "enhance": {"status": "disabled", "reason": "Select a playable Sound Slot or Music Track child node to perform this action."},
+      "edit_volume_pitch": {"status": "disabled", "reason": "Event triggers do not contain direct volume or pitch properties."},
+      "add_variation": {"status": "disabled", "reason": "Select a Random/Sequence Container or Music Track child to manage variations."}
+    },
+    "DialogueEvent": {
+      "listen": {"status": "disabled", "reason": "Select a playable Sound Slot or Music Track child node to perform this action."},
+      "see_plays_when": {"status": "supported", "reason": ""},
+      "see_shared_references": {"status": "disabled", "reason": "Shared recording references only apply to playable audio source nodes."},
+      "see_duration": {"status": "disabled", "reason": "Event triggers do not have a fixed single clip duration."},
+      "export_wav": {"status": "disabled", "reason": "Select a playable Sound Slot or Music Track child node to perform this action."},
+      "replace": {"status": "disabled", "reason": "Select a playable Sound Slot or Music Track child node to perform this action."},
+      "mute": {"status": "disabled", "reason": "Select a playable Sound Slot or Music Track child node to perform this action."},
+      "enhance": {"status": "disabled", "reason": "Select a playable Sound Slot or Music Track child node to perform this action."},
+      "edit_volume_pitch": {"status": "disabled", "reason": "Event triggers do not contain direct volume or pitch properties."},
+      "add_variation": {"status": "disabled", "reason": "Select a Random/Sequence Container or Music Track child to manage variations."}
+    },
+    "Action": {
+      "listen": {"status": "disabled", "reason": "Select a playable Sound Slot or Music Track child node to perform this action."},
+      "see_plays_when": {"status": "disabled", "reason": "This node type is a structural routing or property block and does not have trigger conditions."},
+      "see_shared_references": {"status": "disabled", "reason": "Shared recording references only apply to playable audio source nodes."},
+      "see_duration": {"status": "disabled", "reason": "This node type does not have an audio duration."},
+      "export_wav": {"status": "disabled", "reason": "Select a playable Sound Slot or Music Track child node to perform this action."},
+      "replace": {"status": "disabled", "reason": "Select a playable Sound Slot or Music Track child node to perform this action."},
+      "mute": {"status": "disabled", "reason": "Select a playable Sound Slot or Music Track child node to perform this action."},
+      "enhance": {"status": "disabled", "reason": "Select a playable Sound Slot or Music Track child node to perform this action."},
+      "edit_volume_pitch": {"status": "disabled", "reason": "Editing properties on this node type is not currently supported."},
+      "add_variation": {"status": "disabled", "reason": "Variations cannot be added to this node type."}
+    },
+    "Bus": {
+      "listen": {"status": "disabled", "reason": "Select a playable Sound Slot or Music Track child node to perform this action."},
+      "see_plays_when": {"status": "disabled", "reason": "This node type is a structural routing or property block and does not have trigger conditions."},
+      "see_shared_references": {"status": "disabled", "reason": "Shared recording references only apply to playable audio source nodes."},
+      "see_duration": {"status": "disabled", "reason": "This node type does not have an audio duration."},
+      "export_wav": {"status": "disabled", "reason": "Select a playable Sound Slot or Music Track child node to perform this action."},
+      "replace": {"status": "disabled", "reason": "Select a playable Sound Slot or Music Track child node to perform this action."},
+      "mute": {"status": "disabled", "reason": "Select a playable Sound Slot or Music Track child node to perform this action."},
+      "enhance": {"status": "disabled", "reason": "Select a playable Sound Slot or Music Track child node to perform this action."},
+      "edit_volume_pitch": {"status": "disabled", "reason": "Editing properties on this node type is not currently supported."},
+      "add_variation": {"status": "disabled", "reason": "Variations cannot be added to this node type."}
+    },
+    "AuxBus": {
+      "listen": {"status": "disabled", "reason": "Select a playable Sound Slot or Music Track child node to perform this action."},
+      "see_plays_when": {"status": "disabled", "reason": "This node type is a structural routing or property block and does not have trigger conditions."},
+      "see_shared_references": {"status": "disabled", "reason": "Shared recording references only apply to playable audio source nodes."},
+      "see_duration": {"status": "disabled", "reason": "This node type does not have an audio duration."},
+      "export_wav": {"status": "disabled", "reason": "Select a playable Sound Slot or Music Track child node to perform this action."},
+      "replace": {"status": "disabled", "reason": "Select a playable Sound Slot or Music Track child node to perform this action."},
+      "mute": {"status": "disabled", "reason": "Select a playable Sound Slot or Music Track child node to perform this action."},
+      "enhance": {"status": "disabled", "reason": "Select a playable Sound Slot or Music Track child node to perform this action."},
+      "edit_volume_pitch": {"status": "disabled", "reason": "Editing properties on this node type is not currently supported."},
+      "add_variation": {"status": "disabled", "reason": "Variations cannot be added to this node type."}
+    },
+    "ActorMixer": {
+      "listen": {"status": "disabled", "reason": "Select a playable Sound Slot or Music Track child node to perform this action."},
+      "see_plays_when": {"status": "disabled", "reason": "This node type is a structural routing or property block and does not have trigger conditions."},
+      "see_shared_references": {"status": "disabled", "reason": "Shared recording references only apply to playable audio source nodes."},
+      "see_duration": {"status": "disabled", "reason": "This node type does not have an audio duration."},
+      "export_wav": {"status": "disabled", "reason": "Select a playable Sound Slot or Music Track child node to perform this action."},
+      "replace": {"status": "disabled", "reason": "Select a playable Sound Slot or Music Track child node to perform this action."},
+      "mute": {"status": "disabled", "reason": "Select a playable Sound Slot or Music Track child node to perform this action."},
+      "enhance": {"status": "disabled", "reason": "Select a playable Sound Slot or Music Track child node to perform this action."},
+      "edit_volume_pitch": {"status": "disabled", "reason": "Editing properties on this node type is not currently supported."},
+      "add_variation": {"status": "disabled", "reason": "Variations cannot be added to this node type."}
+    },
+    "Attenuation": {
+      "listen": {"status": "disabled", "reason": "Select a playable Sound Slot or Music Track child node to perform this action."},
+      "see_plays_when": {"status": "disabled", "reason": "This node type is a structural routing or property block and does not have trigger conditions."},
+      "see_shared_references": {"status": "disabled", "reason": "Shared recording references only apply to playable audio source nodes."},
+      "see_duration": {"status": "disabled", "reason": "This node type does not have an audio duration."},
+      "export_wav": {"status": "disabled", "reason": "Select a playable Sound Slot or Music Track child node to perform this action."},
+      "replace": {"status": "disabled", "reason": "Select a playable Sound Slot or Music Track child node to perform this action."},
+      "mute": {"status": "disabled", "reason": "Select a playable Sound Slot or Music Track child node to perform this action."},
+      "enhance": {"status": "disabled", "reason": "Select a playable Sound Slot or Music Track child node to perform this action."},
+      "edit_volume_pitch": {"status": "disabled", "reason": "Editing properties on this node type is not currently supported."},
+      "add_variation": {"status": "disabled", "reason": "Variations cannot be added to this node type."}
+    },
+    "State": {
+      "listen": {"status": "disabled", "reason": "Select a playable Sound Slot or Music Track child node to perform this action."},
+      "see_plays_when": {"status": "disabled", "reason": "This node type is a structural routing or property block and does not have trigger conditions."},
+      "see_shared_references": {"status": "disabled", "reason": "Shared recording references only apply to playable audio source nodes."},
+      "see_duration": {"status": "disabled", "reason": "This node type does not have an audio duration."},
+      "export_wav": {"status": "disabled", "reason": "Select a playable Sound Slot or Music Track child node to perform this action."},
+      "replace": {"status": "disabled", "reason": "Select a playable Sound Slot or Music Track child node to perform this action."},
+      "mute": {"status": "disabled", "reason": "Select a playable Sound Slot or Music Track child node to perform this action."},
+      "enhance": {"status": "disabled", "reason": "Select a playable Sound Slot or Music Track child node to perform this action."},
+      "edit_volume_pitch": {"status": "disabled", "reason": "Editing properties on this node type is not currently supported."},
+      "add_variation": {"status": "disabled", "reason": "Variations cannot be added to this node type."}
+    },
+    "FxCustom": {
+      "listen": {"status": "disabled", "reason": "Select a playable Sound Slot or Music Track child node to perform this action."},
+      "see_plays_when": {"status": "disabled", "reason": "This node type is a structural routing or property block and does not have trigger conditions."},
+      "see_shared_references": {"status": "disabled", "reason": "Shared recording references only apply to playable audio source nodes."},
+      "see_duration": {"status": "disabled", "reason": "This node type does not have an audio duration."},
+      "export_wav": {"status": "disabled", "reason": "Select a playable Sound Slot or Music Track child node to perform this action."},
+      "replace": {"status": "disabled", "reason": "Select a playable Sound Slot or Music Track child node to perform this action."},
+      "mute": {"status": "disabled", "reason": "Select a playable Sound Slot or Music Track child node to perform this action."},
+      "enhance": {"status": "disabled", "reason": "Select a playable Sound Slot or Music Track child node to perform this action."},
+      "edit_volume_pitch": {"status": "disabled", "reason": "Editing properties on this node type is not currently supported."},
+      "add_variation": {"status": "disabled", "reason": "Variations cannot be added to this node type."}
+    },
+    "FxShareSet": {
+      "listen": {"status": "disabled", "reason": "Select a playable Sound Slot or Music Track child node to perform this action."},
+      "see_plays_when": {"status": "disabled", "reason": "This node type is a structural routing or property block and does not have trigger conditions."},
+      "see_shared_references": {"status": "disabled", "reason": "Shared recording references only apply to playable audio source nodes."},
+      "see_duration": {"status": "disabled", "reason": "This node type does not have an audio duration."},
+      "export_wav": {"status": "disabled", "reason": "Select a playable Sound Slot or Music Track child node to perform this action."},
+      "replace": {"status": "disabled", "reason": "Select a playable Sound Slot or Music Track child node to perform this action."},
+      "mute": {"status": "disabled", "reason": "Select a playable Sound Slot or Music Track child node to perform this action."},
+      "enhance": {"status": "disabled", "reason": "Select a playable Sound Slot or Music Track child node to perform this action."},
+      "edit_volume_pitch": {"status": "disabled", "reason": "Editing properties on this node type is not currently supported."},
+      "add_variation": {"status": "disabled", "reason": "Variations cannot be added to this node type."}
+    }
+  },
+  "bank_groups": [
+    {
+      "id": "music_movies",
+      "label": "Music & Movies",
+      "collapsed_by_default": false,
+      "sub_groups": [],
+      "classification": {
+        "prefixes": ["global_music", "global_movies"]
+      }
+    },
+    {
+      "id": "campaign_ui",
+      "label": "Campaign & UI",
+      "collapsed_by_default": false,
+      "sub_groups": [],
+      "classification": {
+        "exact_names": ["global", "global_prologue", "global_ui"],
+        "prefixes": ["campaign", "frontend"]
+      }
+    },
+    {
+      "id": "battle_sfx",
+      "label": "Battle SFX & Environment",
+      "collapsed_by_default": false,
+      "sub_groups": [],
+      "classification": {
+        "prefixes": ["battle"]
+      }
+    },
+    {
+      "id": "battle_vo",
+      "label": "Battle Voice Orders",
+      "collapsed_by_default": false,
+      "sub_groups": ["Barbarian", "Eastern", "Nomad", "Roman"],
+      "classification": {
+        "prefixes": ["battle_vo_orders"]
+      }
+    },
+    {
+      "id": "raw_data",
+      "label": "Raw Audio Data Banks",
+      "collapsed_by_default": true,
+      "sub_groups": [],
+      "classification": {
+        "suffixes": ["_data"]
+      }
+    },
+    {
+      "id": "system_stubs",
+      "label": "System & Empty Stubs",
+      "collapsed_by_default": true,
+      "sub_groups": [],
+      "classification": {
+        "exact_names": ["init", "global_bus", "battle_music", "frontend_data"]
+      }
+    }
+  ]
+}

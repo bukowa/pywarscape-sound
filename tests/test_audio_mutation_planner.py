@@ -10,17 +10,28 @@ import pytest
 
 from src.bnk.bank import HircChunk, SoundBank
 from src.bnk.chunks import BkhdChunk
-from src.bnk.models import CAkSound, HircObject, NodeBaseParams
+from src.bnk.models import (
+    AkMusicMarker,
+    AkMusicTrackSource,
+    AkTrackSrcInfo,
+    CAkMusicSegment,
+    CAkMusicTrack,
+    CAkSound,
+    HircObject,
+    NodeBaseParams,
+)
 from src.bnk.wem import build_silent_pcm_wem_bytes
 from src.engine.ontology import (
     AudioMutationPlan,
     AudioReplacementSource,
     BatchItem,
     CopyMediaBytesIntent,
+    CrossBankCloneSource,
     ExistingMediaReferenceSource,
     ExternalFileSource,
     MarkBankModifiedIntent,
     MediaNodeTarget,
+    MusicTrackTarget,
     MutationBatch,
     MutationTarget,
     PlanRejection,
@@ -29,6 +40,8 @@ from src.engine.ontology import (
     SoundNodeTarget,
     StageLooseWemIntent,
     StageMasterAudioIntent,
+    SyncMusicTimelineIntent,
+    UpdateMusicTrackNodeIntent,
     UpdateSoundNodeIntent,
     WemId,
 )
@@ -537,8 +550,8 @@ def test_plan_overwrite_promotes_embedded_siblings(tmp_path: Path):
     sound3 = CAkSound(
         id=103,
         obj_type=2,
-        plugin_id=0x00040001,
-        stream_type=2,  # already streamed
+        plugin_id=0x00010001,  # already streamed and already PCM
+        stream_type=2,
         source_id=shared_wem,
         file_id=shared_wem,
         node_base_params=NodeBaseParams(),
@@ -606,3 +619,262 @@ def test_plan_batch_respects_batch_item_scope(tmp_path: Path):
     plan = batch_plan.plans[0]
     stage_master = next(e for e in plan.effects if isinstance(e, StageMasterAudioIntent))
     assert stage_master.wem_id == 777888
+
+
+def test_plan_overwrite_streamed_vorbis_sound_updates_plugin_id_to_pcm(tmp_path: Path):
+    audio_file = tmp_path / "custom.wav"
+    audio_file.write_bytes(b"RIFFdummydata")
+
+    sound = CAkSound(
+        id=201,
+        obj_type=2,
+        plugin_id=0x00040001,  # Vorbis
+        stream_type=2,  # Streamed
+        source_id=99999,
+        file_id=99999,
+        node_base_params=NodeBaseParams(),
+    )
+    bank = _make_bank([sound])
+    target = SoundNodeTarget(bank_name="test.bnk", sound_id=201)
+    source = ExternalFileSource(file_path=audio_file)
+
+    plan = plan_audio_replacement(
+        bank=bank,
+        target=target,
+        source=source,
+        scope=ReplacementScope.OVERWRITE,
+    )
+    updates = [e for e in plan.effects if isinstance(e, UpdateSoundNodeIntent)]
+    assert len(updates) == 1
+    assert updates[0].sound_id == 201
+    assert updates[0].new_plugin_id == 0x00010001
+    assert updates[0].new_stream_type == 2
+    assert any(isinstance(e, MarkBankModifiedIntent) for e in plan.effects)
+
+
+def test_plan_music_track_isolate(tmp_path: Path):
+    audio_file = tmp_path / "track_custom.wav"
+    audio_file.write_bytes(b"RIFFdummydata")
+
+    seg = CAkMusicSegment(
+        id=3001,
+        child_ids=[3002],
+        duration=10000.0,
+        markers=[
+            AkMusicMarker(id=1, position=0.0, name="<Entry>"),
+            AkMusicMarker(id=2, position=10000.0, name="<Exit>"),
+        ],
+    )
+    track = CAkMusicTrack(
+        id=3002,
+        sources=[
+            AkMusicTrackSource(
+                plugin_id=0x00040001,
+                stream_type=2,
+                source_id=11111,
+                file_id=11111,
+            ),
+            AkMusicTrackSource(
+                plugin_id=0x00040001,
+                stream_type=2,
+                source_id=22222,
+                file_id=22222,
+            ),
+        ],
+        playlist=[
+            AkTrackSrcInfo(track_id=3002, source_id=11111, src_duration=10000.0),
+            AkTrackSrcInfo(track_id=3002, source_id=22222, src_duration=10000.0),
+        ],
+    )
+    bank = _make_bank([seg, track])
+    target = MusicTrackTarget(bank_name="test.bnk", track_id=3002, source_index=1)
+    source = ExternalFileSource(file_path=audio_file)
+
+    plan = plan_audio_replacement(
+        bank=bank,
+        target=target,
+        source=source,
+        scope=ReplacementScope.ISOLATE,
+        forked_wem_id=555444,
+    )
+    assert not isinstance(plan, PlanRejection)
+    stage = next(e for e in plan.effects if isinstance(e, StageMasterAudioIntent))
+    assert stage.wem_id == 555444
+    track_update = next(e for e in plan.effects if isinstance(e, UpdateMusicTrackNodeIntent))
+    assert track_update.track_id == 3002
+    assert track_update.source_index == 1
+    assert track_update.new_source_id == 555444
+    assert track_update.new_plugin_id == 0x00010001
+    timeline_sync = next(e for e in plan.effects if isinstance(e, SyncMusicTimelineIntent))
+    assert timeline_sync.track_id == 3002
+    assert timeline_sync.parent_segment_id == 3001
+    assert any(isinstance(e, MarkBankModifiedIntent) for e in plan.effects)
+
+
+def test_plan_music_track_overwrite_with_siblings(tmp_path: Path):
+    audio_file = tmp_path / "track_custom.wav"
+    audio_file.write_bytes(b"RIFFdummydata")
+
+    shared_wem = 888111
+    seg = CAkMusicSegment(id=4001, child_ids=[4002, 4003], duration=8000.0)
+    track1 = CAkMusicTrack(
+        id=4002,
+        sources=[
+            AkMusicTrackSource(
+                plugin_id=0x00040001, stream_type=2, source_id=shared_wem, file_id=shared_wem
+            )
+        ],
+        playlist=[AkTrackSrcInfo(track_id=4002, source_id=shared_wem, src_duration=8000.0)],
+    )
+    track2 = CAkMusicTrack(
+        id=4003,
+        sources=[
+            AkMusicTrackSource(
+                plugin_id=0x00040001, stream_type=2, source_id=shared_wem, file_id=shared_wem
+            )
+        ],
+        playlist=[AkTrackSrcInfo(track_id=4003, source_id=shared_wem, src_duration=8000.0)],
+    )
+    sibling_sound = CAkSound(
+        id=4004,
+        obj_type=2,
+        plugin_id=0x00040001,
+        stream_type=2,
+        source_id=shared_wem,
+        file_id=shared_wem,
+        node_base_params=NodeBaseParams(),
+    )
+    bank = _make_bank([seg, track1, track2, sibling_sound])
+    target = MusicTrackTarget(bank_name="test.bnk", track_id=4002, source_index=0)
+    source = ExternalFileSource(file_path=audio_file)
+
+    plan = plan_audio_replacement(
+        bank=bank,
+        target=target,
+        source=source,
+        scope=ReplacementScope.OVERWRITE,
+    )
+    assert not isinstance(plan, PlanRejection)
+    stage = next(e for e in plan.effects if isinstance(e, StageMasterAudioIntent))
+    assert stage.wem_id == shared_wem
+
+    track_updates = [e for e in plan.effects if isinstance(e, UpdateMusicTrackNodeIntent)]
+    assert {u.track_id for u in track_updates} == {4002, 4003}
+    for u in track_updates:
+        assert u.new_plugin_id == 0x00010001
+
+    sound_updates = [e for e in plan.effects if isinstance(e, UpdateSoundNodeIntent)]
+    assert len(sound_updates) == 1
+    assert sound_updates[0].sound_id == 4004
+    assert sound_updates[0].new_plugin_id == 0x00010001
+
+
+def test_plan_music_track_silent_stub():
+    seg = CAkMusicSegment(id=5001, child_ids=[5002], duration=6000.0)
+    track = CAkMusicTrack(
+        id=5002,
+        sources=[
+            AkMusicTrackSource(plugin_id=0x00040001, stream_type=2, source_id=123, file_id=123)
+        ],
+        playlist=[AkTrackSrcInfo(track_id=5002, source_id=123, src_duration=6000.0)],
+    )
+    bank = _make_bank([seg, track])
+    target = MusicTrackTarget(bank_name="test.bnk", track_id=5002, source_index=0)
+    source = SilentStubSource(stub_wem_id=999900)
+
+    plan = plan_audio_replacement(
+        bank=bank,
+        target=target,
+        source=source,
+        scope=ReplacementScope.OVERWRITE,
+    )
+    assert not isinstance(plan, PlanRejection)
+    loose = next(e for e in plan.effects if isinstance(e, StageLooseWemIntent))
+    assert loose.wem_id == 999900
+    timeline = next(e for e in plan.effects if isinstance(e, SyncMusicTimelineIntent))
+    assert timeline.new_duration_ms == 50.0
+
+
+def test_plan_music_track_rejections():
+    seg = CAkMusicSegment(id=6001, child_ids=[6002])
+    track = CAkMusicTrack(
+        id=6002,
+        sources=[AkMusicTrackSource(source_id=10, file_id=10)],
+    )
+    bank = _make_bank([seg, track])
+
+    # 1. Missing track
+    rej1 = try_plan_audio_replacement(
+        bank=bank,
+        target=MusicTrackTarget(bank_name="test.bnk", track_id=999999),
+        source=SilentStubSource(stub_wem_id=1),
+    )
+    assert isinstance(rej1, PlanRejection)
+    assert rej1.code == "TARGET_NOT_FOUND"
+    with pytest.raises(KeyError):
+        plan_audio_replacement(
+            bank=bank,
+            target=MusicTrackTarget(bank_name="test.bnk", track_id=999999),
+            source=SilentStubSource(stub_wem_id=1),
+        )
+
+    # 2. Out-of-bounds source_index
+    rej2 = try_plan_audio_replacement(
+        bank=bank,
+        target=MusicTrackTarget(bank_name="test.bnk", track_id=6002, source_index=5),
+        source=SilentStubSource(stub_wem_id=1),
+    )
+    assert isinstance(rej2, PlanRejection)
+    assert rej2.code == "SOURCE_NOT_FOUND"
+    with pytest.raises(IndexError):
+        plan_audio_replacement(
+            bank=bank,
+            target=MusicTrackTarget(bank_name="test.bnk", track_id=6002, source_index=5),
+            source=SilentStubSource(stub_wem_id=1),
+        )
+
+    # 3. CrossBankCloneSource unsupported
+    rej3 = try_plan_audio_replacement(
+        bank=bank,
+        target=MusicTrackTarget(bank_name="test.bnk", track_id=6002, source_index=0),
+        source=CrossBankCloneSource(source_bank_name="other.bnk", source_node_id=100),
+    )
+    assert isinstance(rej3, PlanRejection)
+    assert rej3.code == "UNSUPPORTED_SOURCE"
+    with pytest.raises(NotImplementedError):
+        plan_audio_replacement(
+            bank=bank,
+            target=MusicTrackTarget(bank_name="test.bnk", track_id=6002, source_index=0),
+            source=CrossBankCloneSource(source_bank_name="other.bnk", source_node_id=100),
+        )
+
+
+def test_plan_with_reserved_wem_ids_avoids_collisions(tmp_path: Path):
+    audio_file = tmp_path / "custom.wav"
+    audio_file.write_bytes(b"RIFFdummydata")
+
+    sound = CAkSound(
+        id=701,
+        obj_type=2,
+        plugin_id=0x00010001,
+        stream_type=2,
+        source_id=100,
+        file_id=100,
+        node_base_params=NodeBaseParams(),
+    )
+    bank = _make_bank([sound])
+    target = SoundNodeTarget(bank_name="test.bnk", sound_id=701)
+    source = ExternalFileSource(file_path=audio_file)
+
+    # Next pseudo-random seed or ID might be 101. Let's reserve a large set of IDs including candidates.
+    reserved = {100, 101, 102, 103, 104, 105}
+    plan = plan_audio_replacement(
+        bank=bank,
+        target=target,
+        source=source,
+        scope=ReplacementScope.ISOLATE,
+        reserved_wem_ids=reserved,
+    )
+    assert not isinstance(plan, PlanRejection)
+    stage = next(e for e in plan.effects if isinstance(e, StageMasterAudioIntent))
+    assert stage.wem_id not in reserved

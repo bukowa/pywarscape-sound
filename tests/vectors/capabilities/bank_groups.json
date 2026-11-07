@@ -1,0 +1,122 @@
+[
+  {
+    "bank_name": "global_music.bnk",
+    "expected_group": "Music & Movies",
+    "expected_subgroup": null
+  },
+  {
+    "bank_name": "global_movies.bnk",
+    "expected_group": "Music & Movies",
+    "expected_subgroup": null
+  },
+  {
+    "bank_name": "global_movies_localised.bnk",
+    "expected_group": "Music & Movies",
+    "expected_subgroup": null
+  },
+  {
+    "bank_name": "battle_music.bnk",
+    "expected_group": "System & Empty Stubs",
+    "expected_subgroup": null
+  },
+  {
+    "bank_name": "init.bnk",
+    "expected_group": "System & Empty Stubs",
+    "expected_subgroup": null
+  },
+  {
+    "bank_name": "global_bus.bnk",
+    "expected_group": "System & Empty Stubs",
+    "expected_subgroup": null
+  },
+  {
+    "bank_name": "frontend_data.bnk",
+    "expected_group": "System & Empty Stubs",
+    "expected_subgroup": null
+  },
+  {
+    "bank_name": "battle_ui_data.bnk",
+    "expected_group": "Raw Audio Data Banks",
+    "expected_subgroup": null
+  },
+  {
+    "bank_name": "animation_blood_data.bnk",
+    "expected_group": "Raw Audio Data Banks",
+    "expected_subgroup": null
+  },
+  {
+    "bank_name": "music_data.bnk",
+    "expected_group": "Raw Audio Data Banks",
+    "expected_subgroup": null
+  },
+  {
+    "bank_name": "battle_vo_orders_roman_inf1.bnk",
+    "expected_group": "Battle Voice Orders",
+    "expected_subgroup": "Roman"
+  },
+  {
+    "bank_name": "battle_vo_orders_barbarian_inf2.bnk",
+    "expected_group": "Battle Voice Orders",
+    "expected_subgroup": "Barbarian"
+  },
+  {
+    "bank_name": "battle_vo_orders_eastern_mtd1.bnk",
+    "expected_group": "Battle Voice Orders",
+    "expected_subgroup": "Eastern"
+  },
+  {
+    "bank_name": "battle_vo_orders_nomad_inf5.bnk",
+    "expected_group": "Battle Voice Orders",
+    "expected_subgroup": "Nomad"
+  },
+  {
+    "bank_name": "battle_vo_orders.bnk",
+    "expected_group": "Battle Voice Orders",
+    "expected_subgroup": null
+  },
+  {
+    "bank_name": "campaign_ui.bnk",
+    "expected_group": "Campaign & UI",
+    "expected_subgroup": null
+  },
+  {
+    "bank_name": "campaign.bnk",
+    "expected_group": "Campaign & UI",
+    "expected_subgroup": null
+  },
+  {
+    "bank_name": "campaign_animation.bnk",
+    "expected_group": "Campaign & UI",
+    "expected_subgroup": null
+  },
+  {
+    "bank_name": "frontend.bnk",
+    "expected_group": "Campaign & UI",
+    "expected_subgroup": null
+  },
+  {
+    "bank_name": "global.bnk",
+    "expected_group": "Campaign & UI",
+    "expected_subgroup": null
+  },
+  {
+    "bank_name": "global_ui.bnk",
+    "expected_group": "Campaign & UI",
+    "expected_subgroup": null
+  },
+  {
+    "bank_name": "battle_projectiles.bnk",
+    "expected_group": "Battle SFX & Environment",
+    "expected_subgroup": null
+  },
+  {
+    "bank_name": "battle.bnk",
+    "expected_group": "Battle SFX & Environment",
+    "expected_subgroup": null
+  },
+  {
+    "bank_name": "battle_environment.bnk",
+    "expected_group": "Battle SFX & Environment",
+    "expected_subgroup": null
+  }
+]

@@ -37,6 +37,7 @@ from src.ui.theme import (
     COLOR_TEXT_MUTED,
     COLOR_TEXT_PRIMARY,
     COLOR_TEXT_SECONDARY,
+    COLOR_WARNING,
 )
 
 
@@ -78,6 +79,7 @@ class AudioSourcesView(QWidget):
         banner_layout.addWidget(self.lbl_target_summary)
 
         self.lbl_status = QLabel("")
+        self.lbl_status.setWordWrap(True)
         self.lbl_status.setStyleSheet(f"color: {COLOR_TEXT_MUTED}; font-size: 11px; border: none;")
         banner_layout.addWidget(self.lbl_status)
 
@@ -204,7 +206,14 @@ class AudioSourcesView(QWidget):
             self.lbl_target_summary.setText(f"{target_count} targets selected")
 
         # Status label
-        self.lbl_status.setText(state.status_message or "")
+        status_text = state.status_message or ""
+        self.lbl_status.setText(status_text)
+        self.lbl_status.setToolTip(status_text)
+        has_rejections = (
+            state.last_outcome is not None and bool(state.last_outcome.rejections)
+        ) or "rejected" in status_text.lower()
+        status_color = COLOR_WARNING if has_rejections else COLOR_TEXT_MUTED
+        self.lbl_status.setStyleSheet(f"color: {status_color}; font-size: 11px; border: none;")
 
         # Active tab
         self.tabs.blockSignals(True)

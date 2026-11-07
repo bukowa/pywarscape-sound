@@ -1,0 +1,50 @@
+[
+  {
+    "name": "sound_replace_overwrite",
+    "target": {
+      "type": "SoundNodeTarget",
+      "bank_name": "battle_rain.bnk",
+      "sound_id": 204996993
+    },
+    "source": {
+      "type": "ExternalFileSource",
+      "file_path": "source_audio/custom_shout.wav"
+    },
+    "scope": "overwrite",
+    "forked_wem_id": null,
+    "expected_result": {
+      "status": "plan",
+      "description": "Replace Sound 204996993 with external file custom_shout.wav (WEM 174224638)",
+      "num_effects": 3,
+      "effect_types": [
+        "StageMasterAudioIntent",
+        "UpdateSoundNodeIntent",
+        "MarkBankModifiedIntent"
+      ]
+    }
+  },
+  {
+    "name": "sound_replace_isolate",
+    "target": {
+      "type": "SoundNodeTarget",
+      "bank_name": "battle_rain.bnk",
+      "sound_id": 204996993
+    },
+    "source": {
+      "type": "ExternalFileSource",
+      "file_path": "source_audio/custom_shout.wav"
+    },
+    "scope": "isolate",
+    "forked_wem_id": 888999,
+    "expected_result": {
+      "status": "plan",
+      "description": "Isolate and replace Sound 204996993 with external file custom_shout.wav (forked WEM 888999)",
+      "num_effects": 3,
+      "effect_types": [
+        "StageMasterAudioIntent",
+        "UpdateSoundNodeIntent",
+        "MarkBankModifiedIntent"
+      ]
+    }
+  }
+]

@@ -9,7 +9,11 @@ from pathlib import Path
 import pytest
 
 from src.engine.ontology import (
+    BatchItem,
+    BatchOutcome,
     ExternalFileSource,
+    MusicTrackTarget,
+    PlanRejection,
     SilentStubSource,
     SoundNodeTarget,
 )
@@ -17,6 +21,7 @@ from src.ui.features.audio_sources.causation import (
     ApplyBatchIntent,
     ApplyEnhanceIntent,
     ApplyRequested,
+    BatchOutcomeReceived,
     ClearPreviewIntent,
     EnhancePreviewRequested,
     EnhanceRequested,
@@ -444,3 +449,44 @@ def test_reconcile_enhance_events_and_intents():
     # 3. ApplyRequested on ENHANCE tab is ignored (dock Apply button is disabled on Enhance tab)
     s4, intents4 = reconcile(s2, ApplyRequested(mode=ApplyMode.ALL))
     assert intents4 == ()
+
+
+def test_batch_applied_with_rejection_surfaces_exact_reason():
+    """Verify BatchOutcomeReceived with PlanRejection produces status_message containing the exact rejection reason."""
+    state = AudioSourcesState()
+    target = MusicTrackTarget(bank_name="music.bnk", track_id=5001)
+    source = ExternalFileSource(file_path=Path("track.wav"))
+    item = BatchItem(target=target, source=source)
+    rejection = PlanRejection(
+        code="UNSUPPORTED_TARGET",
+        reason="Planning not implemented for target type MusicTrackTarget",
+    )
+    outcome = BatchOutcome(
+        applied=0,
+        rejections=((item, rejection),),
+        touched_banks=(),
+    )
+
+    next_state, intents = reconcile(state, BatchOutcomeReceived(outcome=outcome))
+    assert intents == ()
+    assert next_state.status_message is not None
+    assert "Planning not implemented for target type MusicTrackTarget" in next_state.status_message
+    assert next_state.status_message == (
+        "Applied 0 change(s) (1 rejected: Planning not implemented for target type MusicTrackTarget)"
+    )
+
+
+def test_batch_applied_multiple_rejections_deduplicates_reasons():
+    """Verify multiple rejections with identical reasons are deduplicated in status_message."""
+    state = AudioSourcesState()
+    target1 = MusicTrackTarget(bank_name="music.bnk", track_id=5001)
+    target2 = MusicTrackTarget(bank_name="music.bnk", track_id=5002)
+    source = ExternalFileSource(file_path=Path("track.wav"))
+    item1 = BatchItem(target=target1, source=source)
+    item2 = BatchItem(target=target2, source=source)
+    rej1 = PlanRejection(code="UNSUPPORTED_TARGET", reason="Target not supported")
+    rej2 = PlanRejection(code="UNSUPPORTED_TARGET", reason="Target not supported")
+    outcome = BatchOutcome(applied=0, rejections=((item1, rej1), (item2, rej2)))
+
+    next_state, _ = reconcile(state, BatchOutcomeReceived(outcome=outcome))
+    assert next_state.status_message == "Applied 0 change(s) (2 rejected: Target not supported)"

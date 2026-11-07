@@ -1,0 +1,75 @@
+{
+  "known_hash_resolutions": [
+    {"hash": 725141027, "expected_name": "frontend_state"},
+    {"hash": 851019197, "expected_name": "battle_intensity"},
+    {"hash": 1071299879, "expected_name": "game_mode"},
+    {"hash": 2078097994, "expected_name": "music_key"},
+    {"hash": 2739846761, "expected_name": "battle_state"},
+    {"hash": 2854349476, "expected_name": "Music_Dynamic"},
+    {"hash": 3464651813, "expected_name": "music_culture"},
+    {"hash": 3936315213, "expected_name": "campaign_music_state"},
+    {"hash": 4150234903, "expected_name": "battle_result_state"},
+    {"hash": 688797799, "expected_name": "BattleMusic_ChargeCavalry"},
+    {"hash": 1787064993, "expected_name": "barbarian"},
+    {"hash": 2164288628, "expected_name": "roman"},
+    {"hash": 3254137205, "expected_name": "arabic"},
+    {"hash": 4291304636, "expected_name": "hunnic"},
+    {"hash": 645492555, "expected_name": "Out"},
+    {"hash": 1752637612, "expected_name": "In"}
+  ],
+  "graph_indexing_cases": [
+    {
+      "name": "music_switch_container_with_transition_rule",
+      "switch_cntr_id": 1001,
+      "trans_children": [2001, 2002],
+      "tree_leaf_ids": [2003],
+      "trans_rules": [
+        {"alloc_flag": 1, "trans_seg_id": 3001}
+      ],
+      "expected_children": [2001, 2002, 2003, 3001]
+    },
+    {
+      "name": "music_ran_seq_container_with_playlist_and_transition_rule",
+      "ran_seq_cntr_id": 1002,
+      "trans_children": [4001],
+      "playlist_items": [
+        {"segment_id": 5001, "playlist_item_id": 0},
+        {"segment_id": 0, "playlist_item_id": 5002}
+      ],
+      "trans_rules": [
+        {"alloc_flag": 1, "trans_seg_id": 6001}
+      ],
+      "expected_children": [4001, 5001, 5002, 6001]
+    }
+  ],
+  "multi_source_track_projection": {
+    "multi_source_track": {
+      "id": 786167055,
+      "sources": [
+        {"source_id": 798502136, "stream_type": 2},
+        {"source_id": 90437547, "stream_type": 2},
+        {"source_id": 126123828, "stream_type": 2}
+      ],
+      "playlist": [
+        {"source_id": 798502136, "src_duration": 8336.6},
+        {"source_id": 90437547, "src_duration": 10487.6},
+        {"source_id": 126123828, "src_duration": 9910.7}
+      ],
+      "expected_child_keys": [
+        "hirc:786167055:src:0",
+        "hirc:786167055:src:1",
+        "hirc:786167055:src:2"
+      ]
+    },
+    "single_source_track": {
+      "id": 123456,
+      "sources": [
+        {"source_id": 999999, "stream_type": 2}
+      ],
+      "playlist": [
+        {"source_id": 999999, "src_duration": 5000.0}
+      ],
+      "expected_child_keys": []
+    }
+  }
+}

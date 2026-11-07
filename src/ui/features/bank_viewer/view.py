@@ -425,7 +425,12 @@ class BankViewerView(QWidget):
     def _on_export_sound(self, sound_id: int) -> None:
         selected_keys = self.store.state.selected_node_keys
         target_key = f"hirc:{sound_id}"
-        if len(selected_keys) > 1 and target_key in selected_keys:
+        if len(selected_keys) == 1 and next(iter(selected_keys)).startswith(f"hirc:{sound_id}:"):
+            target_key = next(iter(selected_keys))
+        if len(selected_keys) > 1 and (
+            target_key in selected_keys
+            or any(k.startswith(f"hirc:{sound_id}:") for k in selected_keys)
+        ):
             self._export_batch_nodes(list(selected_keys))
         else:
             self._export_single_node(target_key, default_filename=f"{sound_id}.wav")

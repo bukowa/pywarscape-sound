@@ -51,10 +51,12 @@ def resolve_node_audio_track(
             pass
         return None
 
-    # 2. HIRC object: hirc:<id>
+    # 2. HIRC object: hirc:<id> or hirc:<id>:src:<idx>
     if node_key.startswith("hirc:"):
         try:
-            hid = int(node_key.split(":")[1])
+            parts = node_key.split(":")
+            hid = int(parts[1])
+            src_idx: int | None = int(parts[3]) if len(parts) >= 4 and parts[2] == "src" else None
             obj: HircObject | None = None
             if graph_index is not None:
                 obj = graph_index.objects_by_id.get(hid)
@@ -77,6 +79,7 @@ def resolve_node_audio_track(
                     current_bank=bank,
                     resolver=resolver,
                     companion_cache=companion_cache,
+                    source_index=src_idx,
                 )
         except (OSError, ValueError, KeyError, IndexError, RuntimeError, AttributeError):
             pass
@@ -155,9 +158,16 @@ def _resolve_music_track_object(
     current_bank: SoundBank,
     resolver: AssetResolverPort | None,
     companion_cache: dict[int, SoundBank] | None,
+    source_index: int | None = None,
 ) -> AudioTrack | None:
-    """Resolves AudioTrack for a CAkMusicTrack object."""
-    wid = obj.sources[0].source_id if obj.sources else getattr(obj, "source_id", 0)
+    """Resolves AudioTrack for a CAkMusicTrack object or specific sub-track source."""
+    if source_index is not None and 0 <= source_index < len(obj.sources):
+        wid = obj.sources[source_index].source_id
+        title = f"{obj.id} Sub-track {source_index + 1} ({wid}.wem)"
+    else:
+        wid = obj.sources[0].source_id if obj.sources else getattr(obj, "source_id", 0)
+        title = f"{obj.id} ({wid}.wem)"
+
     if not wid:
         return None
 
@@ -166,7 +176,7 @@ def _resolve_music_track_object(
     if p:
         return AudioTrack(
             source_id=AudioSourceId(wid),
-            title=f"{obj.id} ({wid}.wem)",
+            title=title,
             file_path=str(p),
         )
 
@@ -175,7 +185,7 @@ def _resolve_music_track_object(
     if raw:
         return AudioTrack(
             source_id=AudioSourceId(wid),
-            title=f"{obj.id} ({wid}.wem)",
+            title=title,
             embedded_bytes=raw,
         )
 

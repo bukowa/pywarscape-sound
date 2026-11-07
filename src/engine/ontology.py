@@ -45,8 +45,8 @@ class ExternalFileSource:
 
     file_path: Path
     custom_alias: str | None = None
-    target_sample_rate: int = 32000
-    target_channels: int = 1  # 1 for mono SFX/VO, 2 for stereo music
+    target_sample_rate: int | None = None
+    target_channels: int | None = None
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -97,6 +97,7 @@ class MusicTrackTarget:
 
     bank_name: BankName
     track_id: HircId
+    source_index: int = 0
     parent_segment_id: HircId | None = None
 
 
@@ -153,6 +154,20 @@ class UpdateSoundNodeIntent:
     new_stream_type: int = 2
     new_source_id: WemId
     new_file_id: WemId
+    new_plugin_id: int = 0x00010001
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class UpdateMusicTrackNodeIntent:
+    """Intent to update a CAkMusicTrack source descriptor and clip source ID in memory."""
+
+    bank_name: BankName
+    track_id: HircId
+    source_index: int = 0
+    new_stream_type: int = 2
+    new_source_id: WemId
+    new_file_id: WemId
+    new_plugin_id: int = 0x00010001
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -162,6 +177,7 @@ class SyncMusicTimelineIntent:
     bank_name: BankName
     track_id: HircId
     new_duration_ms: float
+    source_index: int = 0
     parent_segment_id: HircId | None = None
 
 
@@ -195,6 +211,7 @@ type AudioMutationEffectIntent = (
     StageMasterAudioIntent
     | StageLooseWemIntent
     | UpdateSoundNodeIntent
+    | UpdateMusicTrackNodeIntent
     | SyncMusicTimelineIntent
     | AppendVariationIntent
     | MarkBankModifiedIntent
