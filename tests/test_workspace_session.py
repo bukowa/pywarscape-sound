@@ -150,6 +150,18 @@ def test_workspace_session_diff_calculation(tmp_path: Path):
     assert diff_with_staged is not None
     assert 12345 in diff_with_staged.modified_media_ids
 
+    # Stage loose streamed WEM (500) where bank has no DIDX for that WEM
+    streamed_sound = CAkSound(id=200, source_id=500, stream_type=2)
+    streamed_bank = SoundBank(
+        header=BkhdChunk(bank_id=400, version=112),
+        hirc=HircChunk(objects=[streamed_sound]),
+    )
+    (cache_dir / "streamed.bnk").write_bytes(streamed_bank.to_bytes())
+    project.manifest.staged_wems.append(500)
+    diff_streamed = session.compute_bank_diff("streamed.bnk", streamed_bank)
+    assert diff_streamed is not None
+    assert 500 in diff_streamed.modified_media_ids
+
 
 def test_workspace_session_sound_mutation_and_undo_redo(tmp_path: Path):
     """Verify sound node audio replacement mutation followed by atomic Undo and Redo."""

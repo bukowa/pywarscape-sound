@@ -115,3 +115,68 @@ def test_end_to_end_modification_highlight_and_filtering(tmp_path, qapp, qtbot):
         item_cats_unhighlighted.foreground(0).color().name().upper()
         != COLOR_STATUS_MODIFIED.upper()
     )
+
+
+def test_end_to_end_modification_highlight_for_loose_streamed_wem(tmp_path, qapp, qtbot):
+    """Verifies that loose streamed WEM replacement highlights hierarchy tree events and sounds."""
+    ev = CAkEvent(id=10, actions=[20])
+    act = CAkAction.create_play(id=20, target_id=30)
+    snd = CAkSound(id=30, source_id=1001, stream_type=2)
+
+    bank = SoundBank(
+        header=BkhdChunk(bank_id=777, version=112),
+        hirc=HircChunk(objects=[ev, act, snd]),
+    )
+    cache_dir = tmp_path / "cache" / "audio"
+    cache_dir.mkdir(parents=True)
+    (cache_dir / "battle_streamed.bnk").write_bytes(bank.to_bytes())
+    cache = GameCache(GameType.ATTILA, cache_dir=cache_dir)
+
+    # Project has loose staged WEM 1001 (OVERWRITE), bank bytes are unchanged in cache
+    proj_dir = tmp_path / "project"
+    project = ProjectStorage.create_project(proj_dir, name="StreamedMod", game=GameType.ATTILA)
+    project.cache = cache
+    project.manifest.staged_wems.append(1001)
+    (project.audio_dir / "1001.wem").write_bytes(b"RIFFWEM")
+
+    store = BankViewerStore(project=project)
+    view = BankViewerView(store)
+    qtbot.addWidget(view)
+
+    # Bank list identifies bank as modified due to staged loose WEM
+    assert view.table_banks.rowCount() == 1
+    assert view.table_banks.item(0, 0).text() == "battle_streamed.bnk"
+    assert view.table_banks.item(0, 1).text() == "Modified"
+
+    store.select_bank("battle_streamed.bnk")
+
+    # Hierarchy tree group is highlighted
+    item_hier = view._items_by_key["group:hierarchy"]
+    assert item_hier.foreground(0).color().name().upper() == COLOR_STATUS_MODIFIED.upper()
+
+    # Event 10 is highlighted
+    item_ev = view._items_by_key.get("hirc:10")
+    assert item_ev is not None
+    assert item_ev.foreground(0).color().name().upper() == COLOR_STATUS_MODIFIED.upper()
+
+    # Expand event -> Action 20 is highlighted
+    view.tree_widget.expandItem(item_ev)
+    item_act = view._items_by_key.get("hirc:20")
+    assert item_act is not None
+    assert item_act.foreground(0).color().name().upper() == COLOR_STATUS_MODIFIED.upper()
+
+    # Expand action -> Sound 30 is highlighted and tagged with [MOD]
+    view.tree_widget.expandItem(item_act)
+    item_snd = view._items_by_key.get("hirc:30")
+    assert item_snd is not None
+    assert item_snd.foreground(0).color().name().upper() == COLOR_STATUS_MODIFIED.upper()
+    assert "[MOD]" in item_snd.text(3)
+
+    # Filter to "Show Modified Only" -> Event 10 remains visible
+    view.chk_show_modified_only.setChecked(True)
+    top_keys = [
+        view.tree_widget.topLevelItem(i).data(0, 257)
+        for i in range(view.tree_widget.topLevelItemCount())
+    ]
+    assert "group:hierarchy" in top_keys
+    assert "group:chunks" not in top_keys

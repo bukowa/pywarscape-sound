@@ -59,6 +59,30 @@ def _node_key_for_target(target: Any) -> str:
     return (getattr(target, "sound_id", None) and f"hirc:{target.sound_id}") or ""
 
 
+def _extract_bank_media_ids(bank: SoundBank) -> set[int]:
+    """Collects all embedded and referenced media/WEM IDs from SoundBank AST."""
+    media_ids: set[int] = set()
+    if bank.didx and bank.didx.entries:
+        media_ids.update(e.file_id for e in bank.didx.entries)
+    if bank.hirc and bank.hirc.objects:
+        for obj in bank.hirc.objects:
+            if isinstance(obj, CAkSound):
+                wid = getattr(obj, "source_id", 0) or getattr(obj, "file_id", 0)
+                if wid > 0:
+                    media_ids.add(wid)
+            elif isinstance(obj, CAkMusicTrack):
+                if hasattr(obj, "sources") and obj.sources:
+                    for s in obj.sources:
+                        sid = getattr(s, "source_id", 0) or getattr(s, "file_id", 0)
+                        if sid > 0:
+                            media_ids.add(sid)
+                else:
+                    sid = getattr(obj, "source_id", 0) or getattr(obj, "file_id", 0)
+                    if sid > 0:
+                        media_ids.add(sid)
+    return media_ids
+
+
 class WorkspaceSession:
     """Domain façade managing SoundBank ASTs, mutation undo/redo stacks, and layered asset resolution."""
 
@@ -77,6 +101,7 @@ class WorkspaceSession:
         self._mutation_undo_stack: list[Any] = []
         self._mutation_redo_stack: list[Any] = []
         self._wem_cache: dict[int, bytes] = {}
+        self._bank_media_ids_cache: dict[str, frozenset[int]] = {}
 
     @property
     def project(self) -> AudioProjectPort | None:
@@ -213,6 +238,7 @@ class WorkspaceSession:
         self._mutation_undo_stack.clear()
         self._mutation_redo_stack.clear()
         self._wem_cache.clear()
+        self._bank_media_ids_cache.clear()
 
     def get_loaded_entry(
         self, bank_name: str
@@ -238,6 +264,7 @@ class WorkspaceSession:
         self._loaded_banks.clear()
         self._companion_banks.clear()
         self._wem_cache.clear()
+        self._bank_media_ids_cache.clear()
         self._sound_db = None
         if self._project is not None:
             self._resolver = getattr(self._project, "resolver", None)
@@ -245,6 +272,9 @@ class WorkspaceSession:
     def get_bank_media_ids(self, bank_name: str) -> frozenset[int]:
         """Returns set of embedded and referenced WEM IDs in bank."""
         clean = (bank_name if bank_name.lower().endswith(".bnk") else f"{bank_name}.bnk").lower()
+        if clean in self._bank_media_ids_cache:
+            return self._bank_media_ids_cache[clean]
+
         for k, entry in self._loaded_banks.items():
             k_clean = (k if k.lower().endswith(".bnk") else f"{k}.bnk").lower()
             if k_clean == clean:
@@ -254,22 +284,42 @@ class WorkspaceSession:
                     ids.update(e.file_id for e in bank.didx.entries)
                 if g_idx is not None and getattr(g_idx, "wem_references", None):
                     ids.update(g_idx.wem_references.keys())
-                return frozenset(ids)
+                res = frozenset(ids)
+                self._bank_media_ids_cache[clean] = res
+                return res
+
         if self._resolver is not None:
             path = self._resolver.resolve_bank_path(clean)
             if path is not None and path.is_file():
-                if (
-                    self._project is not None
-                    and getattr(self._project, "cache", None) is not None
-                    and hasattr(self._project.cache, "cache_dir")
-                    and path.parent == self._project.cache.cache_dir
-                ):
-                    return self._project.cache.get_bank_media_ids(clean)
                 didx_ids = scan_didx_media_ids(path)
-                if didx_ids:
-                    return didx_ids
+                cached_ids: frozenset[int] = frozenset()
+                if (
+                    not didx_ids
+                    and self._project is not None
+                    and getattr(self._project, "cache", None) is not None
+                ):
+                    cached_ids = self._project.cache.get_bank_media_ids(clean)
+
+                media_ids = didx_ids or cached_ids
+                staged = self.get_staged_wems() or set()
+                if media_ids and (not staged or bool(media_ids & staged)):
+                    res = media_ids
+                else:
+                    try:
+                        bank_bytes = path.read_bytes()
+                        bank = SoundBank.from_bytes(bank_bytes)
+                        res = frozenset(_extract_bank_media_ids(bank))
+                    except Exception:
+                        res = media_ids
+                self._bank_media_ids_cache[clean] = res
+                return res
+
         if self._project is not None and getattr(self._project, "cache", None) is not None:
-            return self._project.cache.get_bank_media_ids(clean)
+            res = self._project.cache.get_bank_media_ids(clean)
+            if res:
+                self._bank_media_ids_cache[clean] = res
+                return res
+
         return frozenset()
 
     def is_wem_modified(self, wem_id: int | str) -> bool:
@@ -335,11 +385,9 @@ class WorkspaceSession:
             except (ValueError, KeyError, IndexError, RuntimeError, OSError):
                 base_diff = None
 
-        # Include any staged loose WEMs overriding this bank's embedded media
+        # Include any staged loose WEMs overriding this bank's media (embedded or streamed)
         staged = self.get_staged_wems() or set()
-        bank_media_ids = (
-            {e.file_id for e in bank.didx.entries} if bank.didx and bank.didx.entries else set()
-        )
+        bank_media_ids = _extract_bank_media_ids(bank)
         staged_in_bank = staged & bank_media_ids
         if staged_in_bank:
             existing_media = base_diff.modified_media_ids if base_diff else frozenset()

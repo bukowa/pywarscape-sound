@@ -63,3 +63,37 @@ def test_builder_propagation_for_modified_media():
 
     chunks_group = nodes["group:chunks"]
     assert chunks_group.has_modified_children is True
+
+
+def test_builder_propagation_for_hirc_referencing_modified_media():
+    # Streamed audio replacement (OVERWRITE): AST is unmodified, but loose WEM 1001 is staged.
+    ev = CAkEvent(id=10, actions=[20])
+    act = CAkAction.create_play(id=20, target_id=30)
+    snd = CAkSound(id=30, source_id=1001, stream_type=2)
+
+    bank = SoundBank(
+        header=BkhdChunk(bank_id=999, version=112),
+        hirc=HircChunk(objects=[ev, act, snd]),
+    )
+    graph = BankGraphIndex.build(bank)
+
+    # diff_result has modified_media_ids or staged_wems, but NO modified_object_ids
+    diff = BankDiffResult(modified_media_ids=frozenset([1001]))
+    roots, nodes, details = build_tree_and_details_from_bank(
+        bank, graph, diff_result=diff, staged_wems=frozenset([1001])
+    )
+
+    # Sound 30 references WEM 1001; it MUST be marked is_modified = True
+    node_snd = nodes["hirc:30"]
+    assert node_snd.is_modified is True
+
+    # Parent action and event MUST have has_modified_children = True
+    assert nodes["hirc:20"].has_modified_children is True
+    assert nodes["hirc:10"].has_modified_children is True
+
+    # Category "sounds" and Hierarchy group MUST have has_modified_children = True
+    assert nodes["cat:sounds"].has_modified_children is True
+    assert nodes["group:hierarchy"].has_modified_children is True
+
+    # Chunks group should NOT have has_modified_children since this bank has no DIDX
+    assert nodes["group:chunks"].has_modified_children is False

@@ -1057,8 +1057,12 @@ def _propagate_modification_flags(
     has_mod_children_keys: set[str] = set()
 
     if modified_media:
-        has_mod_children_keys.add("chunk:DIDX")
-        has_mod_children_keys.add("group:chunks")
+        has_mod_embedded = "chunk:DIDX" in nodes and any(
+            f"media:{mid}" in nodes and nodes[f"media:{mid}"].is_modified for mid in modified_media
+        )
+        if has_mod_embedded:
+            has_mod_children_keys.add("chunk:DIDX")
+            has_mod_children_keys.add("group:chunks")
 
     if modified_objects:
         has_mod_children_keys.add("group:hierarchy")
@@ -1099,13 +1103,15 @@ def build_tree_and_details_from_bank(
     nodes: dict[str, HircTreeNode] = {}
     details: dict[str, NodeInspectorDetails] = {}
 
-    modified_objects: frozenset[int] = (
-        diff_result.all_modified_object_ids if diff_result else frozenset()
-    )
     mod_media = set(diff_result.modified_media_ids) if diff_result else set()
     if staged_wems:
         mod_media.update(staged_wems)
     modified_media: frozenset[int] = frozenset(mod_media)
+
+    mod_objs = set(diff_result.all_modified_object_ids if diff_result else frozenset())
+    for wid in modified_media:
+        mod_objs.update(graph_index.get_wem_referencing_hirc_ids(wid))
+    modified_objects: frozenset[int] = frozenset(mod_objs)
 
     media_referencing_sounds = _index_media_referencing_sounds(
         bank=bank,
