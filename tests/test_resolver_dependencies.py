@@ -172,3 +172,56 @@ def test_resolver_nonexistent_returns_none(tmp_path):
     assert resolver.resolve_wem_bytes("invalid_wem.wem") is None
     assert resolver.resolve_database_path() is None
     assert resolver.resolve_database_bytes() is None
+
+
+def test_resolver_baseline_bank_precedence(tmp_path):
+    # Setup vanilla cache
+    cache_dir = tmp_path / "cache" / "audio"
+    cache_dir.mkdir(parents=True)
+    (cache_dir / "vanilla.bnk").write_bytes(b"CACHE_VANILLA")
+    (cache_dir / "shared.bnk").write_bytes(b"CACHE_SHARED")
+    cache = GameCache(GameType.ATTILA, cache_dir=cache_dir)
+
+    # Setup project
+    project_dir = tmp_path / "project"
+    project = ProjectStorage.create_project(project_dir, name="TestMod", game=GameType.ATTILA)
+
+    dep_low_dir = project.get_dependency_dir("dep_low.pack") / "audio"
+    dep_low_dir.mkdir(parents=True)
+    (dep_low_dir / "shared.bnk").write_bytes(b"DEP_LOW_SHARED")
+    (dep_low_dir / "dep_only.bnk").write_bytes(b"DEP_LOW_ONLY")
+
+    dep_high_dir = project.get_dependency_dir("dep_high.pack") / "audio"
+    dep_high_dir.mkdir(parents=True)
+    (dep_high_dir / "shared.bnk").write_bytes(b"DEP_HIGH_SHARED")
+    (dep_high_dir / "dep_only.bnk").write_bytes(b"DEP_HIGH_ONLY")
+
+    project.manifest.dependencies = [
+        DependencyPackInfo(name="dep_low.pack", source_path="/path/low", priority=10),
+        DependencyPackInfo(name="dep_high.pack", source_path="/path/high", priority=0),
+    ]
+
+    resolver = AssetResolver(project, cache)
+
+    # 1. Overlay modification does not affect baseline bank
+    project.save_bank("shared.bnk", b"PROJECT_OVERLAY_SHARED")
+    assert resolver.resolve_bank_bytes("shared.bnk") == b"PROJECT_OVERLAY_SHARED"
+    # Baseline returns the highest-priority dependency, ignoring overlay!
+    assert resolver.resolve_baseline_bank_bytes("shared.bnk") == b"DEP_HIGH_SHARED"
+    assert resolver.resolve_baseline_bank_path("shared.bnk") == dep_high_dir / "shared.bnk"
+
+    # 2. Bank in dependency only (baseline before dep_high is dep_low)
+    assert resolver.resolve_baseline_bank_bytes("dep_only.bnk") == b"DEP_LOW_ONLY"
+
+    # 3. Bank in cache only
+    assert resolver.resolve_baseline_bank_bytes("vanilla.bnk") == b"CACHE_VANILLA"
+
+    # 4. Dependency baseline when cache is None
+    resolver_no_cache = AssetResolver(project, cache=None)
+    assert resolver_no_cache.resolve_baseline_bank_bytes("shared.bnk") == b"DEP_HIGH_SHARED"
+    assert resolver_no_cache.resolve_baseline_bank_bytes("vanilla.bnk") is None
+
+    # 5. Nonexistent or empty bank name
+    assert resolver.resolve_baseline_bank_path("") is None
+    assert resolver.resolve_baseline_bank_bytes("") is None
+    assert resolver.resolve_baseline_bank_path("missing.bnk") is None

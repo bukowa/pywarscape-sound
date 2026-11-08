@@ -59,6 +59,10 @@ class MusicInspectorView(QWidget):
         )
         sc_layout.addWidget(sc_title)
 
+        self.lbl_switch_context = QLabel("Play Condition: -")
+        self.lbl_switch_context.setStyleSheet(f"color: {COLOR_TEXT_PRIMARY}; font-size: 11px;")
+        sc_layout.addWidget(self.lbl_switch_context)
+
         info_row = QHBoxLayout()
         self.lbl_source = QLabel("Source WEM: -")
         self.lbl_source.setStyleSheet(f"color: {COLOR_TEXT_PRIMARY}; font-size: 11px;")
@@ -162,6 +166,7 @@ class MusicInspectorView(QWidget):
         self.ref_table.blockSignals(True)
         if details is None:
             self._current_object_id = None
+            self.lbl_switch_context.setText("Play Condition: -")
             self.lbl_source.setText("Source WEM: -")
             self.lbl_duration.setText("Duration: -")
             self.lbl_refs.setText("Audio WEM References (0) — Double-click to navigate")
@@ -175,6 +180,16 @@ class MusicInspectorView(QWidget):
         self._current_object_id = details.object_id
         self.btn_export.setEnabled(
             details.object_id is not None or details.source_wem_id is not None
+        )
+
+        cond_str = details.switch_path
+        if not cond_str:
+            for p in details.properties:
+                if p.label == "Play Condition":
+                    cond_str = p.value
+                    break
+        self.lbl_switch_context.setText(
+            f"Play Condition: {cond_str}" if cond_str else "Play Condition: -"
         )
 
         wem_str = "-"

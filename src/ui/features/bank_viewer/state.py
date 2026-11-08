@@ -190,6 +190,8 @@ class NodeInspectorDetails:
     ran_seq_semantics: RanSeqContainerSemantics | None = None
     game_entities: GameEntitiesSection | None = None
     source_origin: str = ""
+    switch_path: str | None = None
+    context_summary: str | None = None
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

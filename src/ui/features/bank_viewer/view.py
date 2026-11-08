@@ -113,13 +113,19 @@ class BankTreeWidget(QTreeWidget):
         self.setAcceptDrops(True)
 
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:
-        if event.mimeData().hasFormat("application/x-audio-editor-source"):
+        if (
+            event.mimeData().hasFormat("application/x-audio-editor-source")
+            or event.mimeData().hasUrls()
+        ):
             event.acceptProposedAction()
         else:
             super().dragEnterEvent(event)
 
     def dragMoveEvent(self, event: QDragMoveEvent) -> None:
-        if event.mimeData().hasFormat("application/x-audio-editor-source"):
+        if (
+            event.mimeData().hasFormat("application/x-audio-editor-source")
+            or event.mimeData().hasUrls()
+        ):
             event.acceptProposedAction()
         else:
             super().dragMoveEvent(event)
@@ -138,6 +144,17 @@ class BankTreeWidget(QTreeWidget):
             except (json.JSONDecodeError, UnicodeDecodeError, ValueError, TypeError):
                 paths = ()
 
+            pos = event.position().toPoint() if hasattr(event, "position") else event.pos()
+            item = self.itemAt(pos)
+            target_key = item.data(0, _ROLE_NODE_KEY) if item else ""
+            if not target_key and (curr := self.currentItem()) is not None:
+                target_key = curr.data(0, _ROLE_NODE_KEY) or ""
+
+            self.source_dropped.emit(paths, target_key)
+            event.acceptProposedAction()
+        elif event.mimeData().hasUrls():
+            local_files = [u.toLocalFile() for u in event.mimeData().urls() if u.isLocalFile()]
+            paths = tuple(str(p) for p in local_files if p)
             pos = event.position().toPoint() if hasattr(event, "position") else event.pos()
             item = self.itemAt(pos)
             target_key = item.data(0, _ROLE_NODE_KEY) if item else ""
@@ -375,6 +392,12 @@ class BankViewerView(QWidget):
         self.inspector_panel.export_sound_requested.connect(self._on_export_sound)
         self.inspector_panel.export_media_requested.connect(self._on_export_media)
         self.inspector_panel.revert_media_requested.connect(self._on_wem_revert_requested)
+        node_sig = getattr(self.inspector_panel, "node_params_changed", None)
+        if node_sig is not None and hasattr(node_sig, "connect"):
+            node_sig.connect(self.store.update_node_params)
+        var_sig = getattr(self.inspector_panel, "append_variation_requested", None)
+        if var_sig is not None and hasattr(var_sig, "connect"):
+            var_sig.connect(lambda cid, fpath: self.store.append_container_variation(cid, fpath))
 
         self._shortcut_back = QShortcut(QKeySequence(Qt.Modifier.ALT | Qt.Key.Key_Left), self)
         self._shortcut_back.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
@@ -433,7 +456,17 @@ class BankViewerView(QWidget):
         ):
             self._export_batch_nodes(list(selected_keys))
         else:
-            self._export_single_node(target_key, default_filename=f"{sound_id}.wav")
+            node = self._current_nodes.get(target_key)
+            default_filename = (
+                f"{node.id_str}.wav"
+                if (node and node.id_str)
+                else (
+                    f"{target_key.replace(':', '_')}.wav"
+                    if target_key != f"hirc:{sound_id}"
+                    else f"{sound_id}.wav"
+                )
+            )
+            self._export_single_node(target_key, default_filename=default_filename)
 
     def _on_export_media(self, wem_id: int) -> None:
         selected_keys = self.store.state.selected_node_keys
@@ -491,9 +524,12 @@ class BankViewerView(QWidget):
         if len(selected_keys) > 1 and key in selected_keys:
             menu = QMenu(self)
             act_export_batch = menu.addAction(f"Export {len(selected_keys)} Selected to WAV...")
+            act_mute_selected = menu.addAction(f"Mute Selected ({len(selected_keys)})")
             chosen = menu.exec(self.tree_widget.viewport().mapToGlobal(pos))
             if chosen == act_export_batch:
                 self._export_batch_nodes(selected_keys)
+            elif chosen == act_mute_selected:
+                self.store.mute_nodes(selected_keys)
             return
 
         if key.startswith("media:"):
@@ -519,39 +555,87 @@ class BankViewerView(QWidget):
         if not key.startswith("hirc:"):
             return
         node = self._current_nodes.get(key)
-        if node is None or node.type_str != "Sound":
+        if node is None or node.type_str not in ("Sound", "MusicTrack"):
             return
 
         self.store.select_node(key)
-        try:
-            sound_id = int(key.removeprefix("hirc:"))
-        except ValueError:
-            return
 
         menu = QMenu(self)
         act_export = menu.addAction("Export to WAV...")
-        act_ref = menu.addAction("Reference Media ID...")
+        act_mute = menu.addAction("Mute / Silence")
+        act_ref = None
+        if node.type_str == "Sound" and ":src:" not in key:
+            act_ref = menu.addAction("Reference Media ID...")
 
-        act_revert = None
-        revert_target_wem: int | None = None
+        mid = 0
         entry = self.store.session.get_loaded_entry(self.store.state.selected_bank_name or "")
         if entry is not None:
             _, g_idx, _ = entry
-            hirc_obj = g_idx.objects_by_id.get(sound_id)
-            if hirc_obj is not None:
-                mid = getattr(hirc_obj, "source_id", 0) or getattr(hirc_obj, "file_id", 0)
-                if mid and self.store.is_wem_modified(mid):
-                    act_revert = menu.addAction("Revert Audio to Baseline")
-                    revert_target_wem = mid
+            parts = key.split(":")
+            if len(parts) == 4 and parts[2] == "src":
+                try:
+                    track_id = int(parts[1])
+                    src_idx = int(parts[3])
+                    h_obj = g_idx.objects_by_id.get(track_id)
+                    sources = getattr(h_obj, "sources", ()) if h_obj is not None else ()
+                    if isinstance(sources, (list, tuple)) and 0 <= src_idx < len(sources):
+                        src_desc = sources[src_idx]
+                        mid = getattr(src_desc, "source_id", 0) or getattr(src_desc, "file_id", 0)
+                except (ValueError, IndexError):
+                    pass
+            else:
+                try:
+                    h_id = int(key.removeprefix("hirc:"))
+                    h_obj = g_idx.objects_by_id.get(h_id)
+                    if h_obj is not None:
+                        sources = getattr(h_obj, "sources", ())
+                        if isinstance(sources, (list, tuple)) and len(sources) > 0:
+                            src_desc = sources[0]
+                            mid = getattr(src_desc, "source_id", 0) or getattr(
+                                src_desc, "file_id", 0
+                            )
+                        else:
+                            mid = getattr(h_obj, "source_id", 0) or getattr(h_obj, "file_id", 0)
+                except ValueError:
+                    pass
+
+        if not mid and node.id_str:
+            try:
+                mid = int(node.id_str)
+            except ValueError:
+                pass
+
+        act_revert = None
+        if node.is_modified or (mid > 0 and self.store.is_wem_modified(mid)):
+            act_revert = menu.addAction("Revert Audio to Baseline")
 
         chosen = menu.exec(self.tree_widget.viewport().mapToGlobal(pos))
         if chosen == act_export:
-            self._on_export_sound(sound_id)
-        elif chosen == act_ref:
-            self.inspector_panel.sound_view._current_sound_id = sound_id
-            self.inspector_panel.sound_view._on_reference_clicked()
-        elif chosen == act_revert and revert_target_wem is not None:
-            self._on_wem_revert_requested(revert_target_wem)
+            def_filename = f"{node.id_str}.wav" if node.id_str else f"{key.replace(':', '_')}.wav"
+            self._export_single_node(key, default_filename=def_filename)
+        elif chosen == act_mute:
+            self.store.mute_nodes([key])
+        elif act_ref is not None and chosen == act_ref:
+            try:
+                sound_id = int(key.removeprefix("hirc:"))
+                self.inspector_panel.sound_view._current_sound_id = sound_id
+                self.inspector_panel.sound_view._on_reference_clicked()
+            except ValueError:
+                pass
+        elif act_revert is not None and chosen == act_revert:
+            self._on_node_revert_requested(key)
+
+    def _on_node_revert_requested(self, node_key: str) -> None:
+        reply = QMessageBox.question(
+            self,
+            "Revert Audio Node",
+            f"Are you sure you want to revert node '{node_key}' to baseline audio?\n\n"
+            "This will restore its original audio assignments.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            self.store.revert_node(node_key)
 
     def _on_bank_revert_requested(self, bank_name: str) -> None:
         reply = QMessageBox.question(

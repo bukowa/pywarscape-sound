@@ -84,10 +84,6 @@ def test_all_rome2_banks_bit_exact_roundtrip():
     if not bnk_files:
         skip_or_fail_missing_asset(f"No Rome II SoundBank assets found in {cache_dir}")
 
-    assert len(bnk_files) in (105, 117), (
-        f"Expected 105 or 117 Rome II banks, found {len(bnk_files)}"
-    )
-
     for bnk_path in bnk_files:
         with open(bnk_path, "rb") as f:
             orig = f.read()
@@ -96,6 +92,15 @@ def test_all_rome2_banks_bit_exact_roundtrip():
         assert reserialized == orig, (
             f"Bit-exact round-trip failed on {os.path.basename(bnk_path)} (orig={len(orig)}, reserialized={len(reserialized)})"
         )
+
+    if len(bnk_files) < 105:
+        skip_or_fail_missing_asset(
+            f"Full Rome II SoundBank cache not extracted in {cache_dir} (found {len(bnk_files)})"
+        )
+
+    assert len(bnk_files) in (105, 117), (
+        f"Expected 105 or 117 Rome II banks, found {len(bnk_files)}"
+    )
 
 
 @pytest.mark.assets

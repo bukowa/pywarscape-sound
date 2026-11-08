@@ -216,7 +216,9 @@ def _extract_wem_info_from_key(
 
     if node_key.startswith("hirc:"):
         try:
-            hid = int(node_key.split(":")[1])
+            parts = node_key.split(":")
+            hid = int(parts[1])
+            src_idx = int(parts[3]) if len(parts) >= 4 and parts[2] == "src" else 0
         except (ValueError, IndexError):
             return None, 0
 
@@ -238,9 +240,13 @@ def _extract_wem_info_from_key(
             return (wid if wid else None), comp_bank_id
         elif isinstance(obj, CAkMusicTrack):
             if hasattr(obj, "sources") and obj.sources:
-                src = obj.sources[0]
-                wid = getattr(src, "source_id", 0) or getattr(src, "file_id", 0)
-                return (wid if wid else None), 0
+                src = obj.sources[src_idx] if 0 <= src_idx < len(obj.sources) else obj.sources[0]
+                source_id = getattr(src, "source_id", 0)
+                file_id = getattr(src, "file_id", 0)
+                cur_bank_id = getattr(bank.header, "bank_id", 0) if bank.header else 0
+                comp_bank_id = file_id if file_id and file_id != cur_bank_id else 0
+                wid = source_id or file_id
+                return (wid if wid else None), comp_bank_id
 
     return None, 0
 

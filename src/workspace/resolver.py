@@ -73,14 +73,34 @@ class AssetResolver:
         return None
 
     def resolve_baseline_bank_path(self, bank_name: str) -> Path | None:
-        """Resolves vanilla base game SoundBank path from GameCache."""
-        if not bank_name or self.cache is None:
+        """Resolves SoundBank baseline path before project overlay (checks active dependencies, then GameCache)."""
+        if not bank_name:
             return None
         clean_lower = bank_name.lower()
         if not clean_lower.endswith(".bnk"):
             clean_lower += ".bnk"
 
-        return self.cache.get_bank_path(clean_lower)
+        current_path = self.resolve_bank_path(bank_name)
+
+        # 1. Check active dependencies in load order (priority 0 = highest precedence)
+        sorted_deps = sorted(self.project.manifest.dependencies, key=lambda d: d.priority)
+        for dep in sorted_deps:
+            dep_audio_dir = self.project.get_dependency_dir(dep.name) / "audio"
+            if not dep_audio_dir.is_dir():
+                continue
+            direct = dep_audio_dir / clean_lower
+            if direct.is_file():
+                if current_path is None or direct.resolve() != current_path.resolve():
+                    return direct
+            for f in dep_audio_dir.iterdir():
+                if f.name.lower() == clean_lower and f.is_file():
+                    if current_path is None or f.resolve() != current_path.resolve():
+                        return f
+
+        # 2. Check cache
+        if self.cache is not None:
+            return self.cache.get_bank_path(clean_lower)
+        return None
 
     def resolve_baseline_bank_bytes(self, bank_name: str) -> bytes | None:
         """Reads baseline SoundBank bytes, or None if not found."""

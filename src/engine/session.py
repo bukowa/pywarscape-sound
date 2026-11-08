@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import logging
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import replace
@@ -57,6 +58,50 @@ from src.engine.ports import AssetResolverPort, AudioProjectPort
 logger = logging.getLogger(__name__)
 
 __all__ = ["BatchOutcome", "WorkspaceSession"]
+
+_COMPANION_LOGIC_BANKS: dict[str, tuple[str, ...]] = {
+    "music_data.bnk": ("global_music.bnk",),
+    "animation_blood_data.bnk": ("battle_animation.bnk", "campaign_animation.bnk"),
+    "animation_bodyfall_data.bnk": ("battle_animation.bnk", "campaign_animation.bnk"),
+    "animation_footstep_foley_data.bnk": ("battle_animation.bnk", "campaign_animation.bnk"),
+    "animation_misc_data.bnk": ("battle_animation.bnk", "campaign_animation.bnk"),
+    "animation_siege_data.bnk": ("battle_animation.bnk", "campaign_animation.bnk"),
+    "animation_weapon_data.bnk": ("battle_animation.bnk", "campaign_animation.bnk"),
+    "projectiles_explosion_data.bnk": ("battle_projectiles.bnk",),
+    "projectiles_fire_data.bnk": ("battle_projectiles.bnk",),
+    "projectiles_fire_group_data.bnk": ("battle_projectiles.bnk",),
+    "projectiles_hit_tree_data.bnk": ("battle_projectiles.bnk",),
+    "projectiles_idle_data.bnk": ("battle_projectiles.bnk",),
+    "projectiles_impact_data.bnk": ("battle_projectiles.bnk",),
+    "projectiles_incoming_data.bnk": ("battle_projectiles.bnk",),
+    "projectiles_inflight_data.bnk": ("battle_projectiles.bnk",),
+    "group_melee_data.bnk": ("battle.bnk",),
+    "group_movement_data.bnk": ("battle.bnk",),
+    "group_sound_data.bnk": ("battle.bnk",),
+    "lfe_data.bnk": ("battle.bnk",),
+    "vocalisations_data.bnk": ("battle_vocalisations.bnk", "campaign_vocalisations.bnk"),
+    "environment_data.bnk": ("battle_environment.bnk",),
+    "rain_data.bnk": ("battle_rain.bnk",),
+    "battle_data.bnk": ("battle.bnk",),
+    "battle_ui_data.bnk": ("battle_ui.bnk",),
+    "campaign_data.bnk": ("campaign.bnk",),
+    "campaign_ui_data.bnk": ("campaign_ui.bnk",),
+    "global_ui_data.bnk": ("global_ui.bnk",),
+    "global_bus_data.bnk": ("global_bus.bnk",),
+}
+
+
+def _resolve_companion_logic_banks(bank_name: str) -> tuple[str, ...]:
+    """Resolves companion HIRC logic SoundBank names for a given SoundBank name."""
+    b_lower = bank_name.lower()
+    if not b_lower.endswith(".bnk"):
+        b_lower += ".bnk"
+    if b_lower in _COMPANION_LOGIC_BANKS:
+        return _COMPANION_LOGIC_BANKS[b_lower]
+    if b_lower.endswith("_data.bnk"):
+        stem = b_lower.removesuffix("_data.bnk")
+        return (f"{stem}.bnk",)
+    return ()
 
 
 def _node_key_for_target(target: Any) -> str:
@@ -116,6 +161,9 @@ class WorkspaceSession:
         self._mutation_redo_stack: list[Any] = []
         self._wem_cache: dict[int, bytes] = {}
         self._bank_media_ids_cache: dict[str, frozenset[int]] = {}
+        self._unopened_scanned_for_refs: bool = False
+        self._global_wem_to_banks: dict[int, set[str]] | None = None
+        self._baseline_reserved_wem_ids: set[int] | None = None
 
     @property
     def project(self) -> AudioProjectPort | None:
@@ -241,6 +289,9 @@ class WorkspaceSession:
         self._project = project
         self._sound_db = None
         self._resolver = getattr(project, "resolver", None) if project is not None else None
+        self._unopened_scanned_for_refs = False
+        self._global_wem_to_banks = None
+        self._baseline_reserved_wem_ids = None
 
     def reset(self) -> None:
         """Clears project reference, resolver, loaded bank ASTs, and mutation history stacks."""
@@ -253,6 +304,13 @@ class WorkspaceSession:
         self._mutation_redo_stack.clear()
         self._wem_cache.clear()
         self._bank_media_ids_cache.clear()
+        self._unopened_scanned_for_refs = False
+        self._global_wem_to_banks = None
+        self._baseline_reserved_wem_ids = None
+
+    def clear(self) -> None:
+        """Alias for reset()."""
+        self.reset()
 
     def get_loaded_entry(
         self, bank_name: str
@@ -280,6 +338,9 @@ class WorkspaceSession:
         self._wem_cache.clear()
         self._bank_media_ids_cache.clear()
         self._sound_db = None
+        self._unopened_scanned_for_refs = False
+        self._global_wem_to_banks = None
+        self._baseline_reserved_wem_ids = None
         if self._project is not None:
             self._resolver = getattr(self._project, "resolver", None)
 
@@ -377,14 +438,321 @@ class WorkspaceSession:
     def revert_wem(self, wem_id: int | str) -> bool:
         """
         Reverts loose .wem file and evicts from in-memory cache.
+        Also restores any HIRC nodes across loaded/modified banks referencing wem_id to baseline.
         Returns True if reverted.
         """
-        if self._project is None:
+        try:
+            wid = int(str(wem_id).removesuffix(".wem"))
+        except (ValueError, TypeError):
             return False
-        wid = int(str(wem_id).removesuffix(".wem"))
-        res = self._project.revert_wem_completely(wid)
+
+        res = False
+        if self._project is not None:
+            res = self._project.revert_wem_completely(wid)
         self._wem_cache.pop(wid, None)
-        return res
+
+        candidate_bank_names: set[str] = set(self._loaded_banks.keys())
+        if self._project is not None and hasattr(self._project, "manifest"):
+            for b in getattr(self._project.manifest, "modified_banks", ()):
+                candidate_bank_names.add(b.lower())
+
+        nodes_restored = False
+        for b_name in candidate_bank_names:
+            entry = self.get_loaded_entry(b_name)
+            if entry is None:
+                try:
+                    entry = self.resolve_and_parse_bank(b_name)
+                except (
+                    FileNotFoundError,
+                    ValueError,
+                    KeyError,
+                    IndexError,
+                    RuntimeError,
+                    OSError,
+                    EOFError,
+                ):
+                    continue
+            bank = entry[0]
+
+            baseline_bytes = (
+                self._resolver.resolve_baseline_bank_bytes(b_name)
+                if self._resolver is not None
+                else None
+            )
+            if not baseline_bytes:
+                continue
+
+            try:
+                base_bank = SoundBank.from_bytes(baseline_bytes)
+            except (
+                FileNotFoundError,
+                ValueError,
+                KeyError,
+                IndexError,
+                RuntimeError,
+                OSError,
+                EOFError,
+            ):
+                continue
+
+            if (
+                not bank.hirc
+                or not bank.hirc.objects
+                or not base_bank.hirc
+                or not base_bank.hirc.objects
+            ):
+                continue
+
+            base_objs_by_id = {o.id: o for o in base_bank.hirc.objects}
+            bank_updated = False
+
+            for idx, obj in enumerate(list(bank.hirc.objects)):
+                needs_restore = False
+                if isinstance(obj, CAkSound):
+                    s_wid = getattr(obj, "source_id", 0) or getattr(obj, "file_id", 0)
+                    if s_wid == wid:
+                        needs_restore = True
+                    elif obj.id in base_objs_by_id:
+                        base_s = base_objs_by_id[obj.id]
+                        if isinstance(base_s, CAkSound):
+                            base_swid = getattr(base_s, "source_id", 0) or getattr(
+                                base_s, "file_id", 0
+                            )
+                            if base_swid == wid:
+                                needs_restore = True
+                elif isinstance(obj, CAkMusicTrack):
+                    if hasattr(obj, "sources") and obj.sources:
+                        for s in obj.sources:
+                            swid = getattr(s, "source_id", 0) or getattr(s, "file_id", 0)
+                            if swid == wid:
+                                needs_restore = True
+                                break
+                    if not needs_restore and obj.id in base_objs_by_id:
+                        base_t = base_objs_by_id[obj.id]
+                        if (
+                            isinstance(base_t, CAkMusicTrack)
+                            and hasattr(base_t, "sources")
+                            and base_t.sources
+                        ):
+                            for s in base_t.sources:
+                                swid = getattr(s, "source_id", 0) or getattr(s, "file_id", 0)
+                                if swid == wid:
+                                    needs_restore = True
+                                    break
+
+                if needs_restore and obj.id in base_objs_by_id:
+                    base_o = base_objs_by_id[obj.id]
+                    bank.hirc.objects[idx] = copy.deepcopy(base_o)
+                    bank_updated = True
+                    nodes_restored = True
+
+                    if isinstance(base_o, CAkMusicTrack):
+                        parent_seg_curr = find_parent_segment_in_bank(bank, base_o.id)
+                        if parent_seg_curr is not None:
+                            parent_seg_base = find_parent_segment_in_bank(base_bank, base_o.id)
+                            if parent_seg_base is not None:
+                                base_tracks = {
+                                    o.id: o
+                                    for o in base_bank.hirc.objects
+                                    if isinstance(o, CAkMusicTrack)
+                                }
+                                curr_tracks = {
+                                    o.id: o
+                                    for o in bank.hirc.objects
+                                    if isinstance(o, CAkMusicTrack)
+                                }
+                                other_differs = False
+                                for child_id in getattr(parent_seg_base, "child_ids", ()):
+                                    if child_id != base_o.id:
+                                        if child_id in curr_tracks and child_id in base_tracks:
+                                            if curr_tracks[child_id] != base_tracks[child_id]:
+                                                other_differs = True
+                                                break
+                                if not other_differs:
+                                    for s_idx, o in enumerate(bank.hirc.objects):
+                                        if o.id == parent_seg_curr.id:
+                                            bank.hirc.objects[s_idx] = copy.deepcopy(
+                                                parent_seg_base
+                                            )
+                                            break
+
+            if bank_updated:
+                struct_diff = diff_soundbanks(bank, base_bank)
+                if self._project is not None:
+                    if not struct_diff.is_modified:
+                        self._project.revert_bank(b_name)
+                    else:
+                        self._project.save_bank(b_name, bank.to_bytes())
+                diff_res = self.compute_bank_diff(b_name, bank)
+                self.index_soundbank(b_name, bank, diff_result=diff_res)
+
+        return res or nodes_restored
+
+    def revert_node_to_baseline(self, bank_name: str, node_key: str) -> bool:
+        """
+        Reverts a single HIRC or media node in a SoundBank to its baseline state.
+        Restores HIRC AST, cleans up unshared loose WEMs, and reconciles project storage.
+        Returns True if reverted successfully.
+        """
+        if not bank_name or not node_key:
+            return False
+
+        if node_key.startswith("media:"):
+            try:
+                wid = int(node_key.removeprefix("media:"))
+            except (ValueError, TypeError):
+                return False
+            return self.revert_wem(wid)
+
+        if not node_key.startswith("hirc:"):
+            return False
+
+        parts = node_key.split(":")
+        try:
+            obj_id = int(parts[1])
+        except (ValueError, IndexError):
+            return False
+
+        entry = self.get_loaded_entry(bank_name)
+        if entry is None:
+            try:
+                entry = self.resolve_and_parse_bank(bank_name)
+            except (
+                FileNotFoundError,
+                ValueError,
+                KeyError,
+                IndexError,
+                RuntimeError,
+                OSError,
+                EOFError,
+            ):
+                return False
+
+        bank = entry[0]
+        if self._resolver is None:
+            return False
+
+        baseline_bytes = self._resolver.resolve_baseline_bank_bytes(bank_name)
+        if baseline_bytes is None:
+            return False
+
+        try:
+            base_bank = SoundBank.from_bytes(baseline_bytes)
+        except (
+            FileNotFoundError,
+            ValueError,
+            KeyError,
+            IndexError,
+            RuntimeError,
+            OSError,
+            EOFError,
+        ):
+            return False
+
+        if (
+            not bank.hirc
+            or not bank.hirc.objects
+            or not base_bank.hirc
+            or not base_bank.hirc.objects
+        ):
+            return False
+
+        curr_idx = -1
+        curr_obj = None
+        for idx, o in enumerate(bank.hirc.objects):
+            if o.id == obj_id:
+                curr_idx = idx
+                curr_obj = o
+                break
+        if curr_obj is None or curr_idx < 0:
+            return False
+
+        base_obj = None
+        for o in base_bank.hirc.objects:
+            if o.id == obj_id:
+                base_obj = o
+                break
+        if base_obj is None:
+            return False
+
+        # Record any WEM IDs referenced by the current object BEFORE reverting
+        old_wems: set[int] = set()
+        base_wems: set[int] = set()
+        if isinstance(curr_obj, CAkSound):
+            w = getattr(curr_obj, "source_id", 0) or getattr(curr_obj, "file_id", 0)
+            if w > 0:
+                old_wems.add(w)
+        elif isinstance(curr_obj, CAkMusicTrack):
+            if hasattr(curr_obj, "sources") and curr_obj.sources:
+                for s in curr_obj.sources:
+                    w = getattr(s, "source_id", 0) or getattr(s, "file_id", 0)
+                    if w > 0:
+                        old_wems.add(w)
+
+        if isinstance(base_obj, CAkSound):
+            w = getattr(base_obj, "source_id", 0) or getattr(base_obj, "file_id", 0)
+            if w > 0:
+                base_wems.add(w)
+        elif isinstance(base_obj, CAkMusicTrack):
+            if hasattr(base_obj, "sources") and base_obj.sources:
+                for s in base_obj.sources:
+                    w = getattr(s, "source_id", 0) or getattr(s, "file_id", 0)
+                    if w > 0:
+                        base_wems.add(w)
+
+        bank.hirc.objects[curr_idx] = copy.deepcopy(base_obj)
+
+        if isinstance(base_obj, CAkMusicTrack):
+            parent_seg_curr = find_parent_segment_in_bank(bank, base_obj.id)
+            if parent_seg_curr is not None:
+                parent_seg_base = find_parent_segment_in_bank(base_bank, base_obj.id)
+                if parent_seg_base is not None:
+                    base_tracks = {
+                        o.id: o for o in base_bank.hirc.objects if isinstance(o, CAkMusicTrack)
+                    }
+                    curr_tracks = {
+                        o.id: o for o in bank.hirc.objects if isinstance(o, CAkMusicTrack)
+                    }
+                    other_differs = False
+                    for child_id in getattr(parent_seg_base, "child_ids", ()):
+                        if child_id != base_obj.id:
+                            if child_id in curr_tracks and child_id in base_tracks:
+                                if curr_tracks[child_id] != base_tracks[child_id]:
+                                    other_differs = True
+                                    break
+                    if not other_differs:
+                        for s_idx, o in enumerate(bank.hirc.objects):
+                            if o.id == parent_seg_curr.id:
+                                bank.hirc.objects[s_idx] = copy.deepcopy(parent_seg_base)
+                                break
+
+        staged = self.get_staged_wems() or set()
+        for wid in old_wems:
+            if wid in staged and (
+                wid not in base_wems or not self.get_cross_bank_wem_references(wid)
+            ):
+                still_referenced = False
+                for b_k, (b_ast, _, d_res) in self._loaded_banks.items():
+                    if b_k == bank_name.lower():
+                        continue
+                    if d_res and d_res.is_modified and wid in _extract_bank_media_ids(b_ast):
+                        still_referenced = True
+                        break
+                if not still_referenced:
+                    if self._project is not None:
+                        self._project.revert_wem_completely(wid)
+                    self._wem_cache.pop(wid, None)
+
+        struct_diff = diff_soundbanks(bank, base_bank)
+        if self._project is not None:
+            if not struct_diff.is_modified:
+                self._project.revert_bank(bank_name)
+            else:
+                self._project.save_bank(bank_name, bank.to_bytes())
+
+        diff_res = self.compute_bank_diff(bank_name, bank)
+        self.index_soundbank(bank_name, bank, diff_result=diff_res)
+        return True
 
     def compute_bank_diff(self, bank_name: str, bank: SoundBank) -> BankDiffResult | None:
         """Computes diff between bank and baseline (vanilla cache or dependency)."""
@@ -448,10 +816,98 @@ class WorkspaceSession:
         diff_res = self.compute_bank_diff(bank_name, bank)
         return self.index_soundbank(bank_name, bank, diff_result=diff_res)
 
+    def _discover_all_project_bank_names(self) -> list[str]:
+        """Discovers all SoundBank filenames across project overlay, active dependencies, and GameCache."""
+        if self._project is None:
+            return []
+        bank_names: set[str] = set()
+
+        # 1. Project audio directory
+        audio_dir = getattr(self._project, "audio_dir", None)
+        if audio_dir is not None and isinstance(audio_dir, Path):
+            try:
+                if audio_dir.is_dir():
+                    for f in audio_dir.iterdir():
+                        if f.is_file() and f.suffix.lower() == ".bnk":
+                            bank_names.add(f.name.lower())
+            except (OSError, PermissionError):
+                pass
+
+        # 2. Manifest modified banks and dependencies
+        manifest = getattr(self._project, "manifest", None)
+        if manifest is not None:
+            for b in getattr(manifest, "modified_banks", ()):
+                clean = b.lower() if b.lower().endswith(".bnk") else f"{b.lower()}.bnk"
+                bank_names.add(clean)
+
+            get_dep_dir = getattr(self._project, "get_dependency_dir", None)
+            if callable(get_dep_dir) and hasattr(manifest, "dependencies"):
+                for dep in getattr(manifest, "dependencies", ()):
+                    try:
+                        dep_audio = get_dep_dir(dep.name) / "audio"
+                        if dep_audio.is_dir():
+                            for f in dep_audio.iterdir():
+                                if f.is_file() and f.suffix.lower() == ".bnk":
+                                    bank_names.add(f.name.lower())
+                    except (OSError, PermissionError):
+                        pass
+
+        # 3. GameCache
+        cache = getattr(self._project, "cache", None)
+        if cache is None and self._resolver is not None:
+            cache = getattr(self._resolver, "cache", None)
+        if cache is not None:
+            try:
+                list_banks_fn = getattr(cache, "list_banks", None)
+                if callable(list_banks_fn):
+                    for b in list_banks_fn():
+                        clean = b.lower() if b.lower().endswith(".bnk") else f"{b.lower()}.bnk"
+                        bank_names.add(clean)
+            except (OSError, PermissionError):
+                pass
+
+        return sorted(bank_names)
+
     def get_cross_bank_wem_references(self, wem_id: int) -> tuple[WemReference, ...]:
-        """Returns all HIRC node references to wem_id across all currently loaded SoundBanks."""
+        """Returns all HIRC node references to wem_id across loaded and discovered SoundBanks."""
         if not wem_id or wem_id <= 0:
             return ()
+
+        if not self._unopened_scanned_for_refs and self._project is not None:
+            self._unopened_scanned_for_refs = True
+            if self._global_wem_to_banks is None:
+                self._global_wem_to_banks = {}
+                try:
+                    for b_name in self._discover_all_project_bank_names():
+                        try:
+                            m_ids = self.get_bank_media_ids(b_name)
+                            for mid in m_ids:
+                                self._global_wem_to_banks.setdefault(mid, set()).add(b_name)
+                        except (OSError, ValueError, KeyError, IndexError, RuntimeError):
+                            pass
+                except (OSError, ValueError, KeyError, IndexError, RuntimeError):
+                    pass
+
+        if self._global_wem_to_banks is not None:
+            candidate_banks = set(self._global_wem_to_banks.get(wem_id, set()))
+            for b in list(candidate_banks) + list(self._loaded_banks.keys()):
+                for comp in _resolve_companion_logic_banks(b):
+                    candidate_banks.add(comp)
+
+            for b_name in candidate_banks:
+                clean = b_name.lower()
+                if clean not in self._loaded_banks:
+                    try:
+                        self.resolve_and_parse_bank(b_name)
+                    except (
+                        FileNotFoundError,
+                        ValueError,
+                        KeyError,
+                        IndexError,
+                        RuntimeError,
+                        OSError,
+                    ):
+                        pass
 
         refs: list[WemReference] = []
         for b_name, (bank, graph_index, _) in self._loaded_banks.items():
@@ -502,8 +958,78 @@ class WorkspaceSession:
         return len(self.get_cross_bank_wem_references(wem_id))
 
     def _collect_reserved_wem_ids(self) -> set[int]:
-        """Collects all known WEM IDs across all loaded banks and staged files."""
-        reserved: set[int] = set()
+        """Collects all known WEM IDs across all loaded banks, discovered project banks, and loose files."""
+        if self._baseline_reserved_wem_ids is None:
+            baseline: set[int] = set()
+            if self._project is not None:
+                # 1. Bank media IDs from all discovered project banks
+                for b_name in self._discover_all_project_bank_names():
+                    try:
+                        baseline.update(self.get_bank_media_ids(b_name))
+                    except (OSError, ValueError, KeyError, IndexError, RuntimeError):
+                        pass
+
+                # 2. Loose .wem files in project audio_dir
+                audio_dir = getattr(self._project, "audio_dir", None)
+                if audio_dir is not None and isinstance(audio_dir, Path):
+                    try:
+                        if audio_dir.is_dir():
+                            for f in audio_dir.iterdir():
+                                if f.is_file() and f.suffix.lower() == ".wem" and f.stem.isdigit():
+                                    baseline.add(int(f.stem))
+                    except (OSError, PermissionError):
+                        pass
+
+                # 3. Loose .wem files in active dependencies
+                manifest = getattr(self._project, "manifest", None)
+                get_dep_dir = getattr(self._project, "get_dependency_dir", None)
+                if (
+                    manifest is not None
+                    and callable(get_dep_dir)
+                    and hasattr(manifest, "dependencies")
+                ):
+                    for dep in getattr(manifest, "dependencies", ()):
+                        try:
+                            dep_audio = get_dep_dir(dep.name) / "audio"
+                            if dep_audio.is_dir():
+                                for f in dep_audio.iterdir():
+                                    if (
+                                        f.is_file()
+                                        and f.suffix.lower() == ".wem"
+                                        and f.stem.isdigit()
+                                    ):
+                                        baseline.add(int(f.stem))
+                        except (OSError, PermissionError):
+                            pass
+
+                # 4. Loose .wem files in cache
+                cache = getattr(self._project, "cache", None)
+                if cache is None and self._resolver is not None:
+                    cache = getattr(self._resolver, "cache", None)
+                if cache is not None:
+                    list_wems_fn = getattr(cache, "list_wems", None)
+                    if callable(list_wems_fn):
+                        try:
+                            baseline.update(list_wems_fn())
+                        except (OSError, PermissionError):
+                            pass
+                    cache_dir = getattr(cache, "cache_dir", None)
+                    if cache_dir is not None and isinstance(cache_dir, Path):
+                        try:
+                            if cache_dir.is_dir():
+                                for f in cache_dir.iterdir():
+                                    if (
+                                        f.is_file()
+                                        and f.suffix.lower() == ".wem"
+                                        and f.stem.isdigit()
+                                    ):
+                                        baseline.add(int(f.stem))
+                        except (OSError, PermissionError):
+                            pass
+
+            self._baseline_reserved_wem_ids = baseline
+
+        reserved: set[int] = set(self._baseline_reserved_wem_ids)
         for _, entry in self._loaded_banks.items():
             bank, graph_index, _ = entry
             reserved.update(graph_index.wem_references.keys())
@@ -593,26 +1119,20 @@ class WorkspaceSession:
                     elif isinstance(eff, CopyMediaBytesIntent):
                         target_wems.add(eff.target_wem_id)
 
-                # Cross-bank promotion: when MediaNodeTarget is on a *_data.bnk, try loading companion logic bank
-                b_lower = item.target.bank_name.lower()
-                companion_name: str | None = None
-                if b_lower.endswith("_data.bnk"):
-                    companion_name = item.target.bank_name[:-9] + ".bnk"
-                elif b_lower.endswith("_data"):
-                    companion_name = item.target.bank_name[:-5] + ".bnk"
-
-                if companion_name is not None and self.get_loaded_entry(companion_name) is None:
-                    try:
-                        self.resolve_and_parse_bank(companion_name)
-                    except (
-                        FileNotFoundError,
-                        ValueError,
-                        KeyError,
-                        IndexError,
-                        RuntimeError,
-                        OSError,
-                    ):
-                        pass
+                # Cross-bank promotion: when MediaNodeTarget is on a *_data.bnk, try loading companion logic bank(s)
+                for companion_name in _resolve_companion_logic_banks(item.target.bank_name):
+                    if self.get_loaded_entry(companion_name) is None:
+                        try:
+                            self.resolve_and_parse_bank(companion_name)
+                        except (
+                            FileNotFoundError,
+                            ValueError,
+                            KeyError,
+                            IndexError,
+                            RuntimeError,
+                            OSError,
+                        ):
+                            pass
 
                 for wid in target_wems:
                     cross_refs = self.get_cross_bank_wem_references(wid)
@@ -1160,7 +1680,12 @@ class WorkspaceSession:
                 self._project.manifest.save(self._project.manifest_path)
 
             self._mutation_redo_stack.append(txn)
-            touched = tuple(dict.fromkeys(r.bank_name for r in txn.records))
+            primary_bank = txn.records[0].bank_name if txn.records else ""
+            unique_banks = list(dict.fromkeys(r.bank_name for r in txn.records))
+            if primary_bank in unique_banks and len(unique_banks) > 1:
+                unique_banks.remove(primary_bank)
+                unique_banks.append(primary_bank)
+            touched = tuple(unique_banks)
             primary_key = txn.records[0].node_key if txn.records else None
             return (touched, primary_key)
         except Exception:
@@ -1236,8 +1761,13 @@ class WorkspaceSession:
                 self._project.manifest.save(self._project.manifest_path)
 
             self._mutation_undo_stack.append(txn)
-            touched = tuple(dict.fromkeys(r.bank_name for r in txn.records))
-            primary_key = txn.records[-1].node_key if txn.records else None
+            primary_bank = txn.records[0].bank_name if txn.records else ""
+            unique_banks = list(dict.fromkeys(r.bank_name for r in txn.records))
+            if primary_bank in unique_banks and len(unique_banks) > 1:
+                unique_banks.remove(primary_bank)
+                unique_banks.append(primary_bank)
+            touched = tuple(unique_banks)
+            primary_key = txn.records[0].node_key if txn.records else None
             return (touched, primary_key)
         except Exception:
             logger.exception("Failed to redo audio mutation")

@@ -25,6 +25,7 @@ from src.bnk.models import (
     CAkRanSeqCntr,
     CAkSound,
     CAkSwitchCntr,
+    DecisionTreeNode,
     HircObject,
 )
 from src.engine.graph import BankGraphIndex, resolve_hash_name
@@ -123,6 +124,8 @@ class SoundDatabaseProvider:
         elif isinstance(obj, CAkDialogueEvent):
             name = self._resolve_name(obj.id, bank, ctx.sound_db)
             category = "Dialogue"
+            if name:
+                ctx.event_names_by_object_id[obj.id] = name
         elif isinstance(obj, CAkSwitchCntr):
             sw_name = self._resolve_name(obj.group_id, bank, ctx.sound_db)
             if sw_name:
@@ -142,7 +145,7 @@ class SoundDatabaseProvider:
         return NodeMetadataInfo(
             friendly_label=name,
             category=category,
-            event_name=name if isinstance(obj, CAkEvent) else None,
+            event_name=name if isinstance(obj, (CAkEvent, CAkDialogueEvent)) else None,
         )
 
     def resolve_media(
@@ -334,6 +337,67 @@ class GameCatalogProvider:
         return None
 
 
+def resolve_decision_tree_paths(
+    obj: Any,
+    bank: SoundBank,
+    sound_db: Any | None = None,
+) -> dict[int, list[str]]:
+    """Resolves multi-depth branch paths from a decision tree to leaf audio node IDs."""
+    tree = getattr(obj, "tree", None)
+    if tree is None:
+        return {}
+
+    arguments = getattr(obj, "arguments", []) or []
+    paths: dict[int, list[str]] = {}
+
+    root = getattr(tree, "root", None)
+    if root and getattr(root, "children", None):
+
+        def _walk(node: DecisionTreeNode, depth: int, current_steps: list[str]) -> None:
+            if depth >= 32:
+                return
+            arg_id = arguments[depth][0] if depth < len(arguments) else 0
+            gname = resolve_hash_name(arg_id, bank, sound_db=sound_db) or (
+                f"0x{arg_id:08X}" if arg_id else "0x00000000"
+            )
+            bname = (
+                (resolve_hash_name(node.key, bank, sound_db=sound_db) or f"0x{node.key:08X}")
+                if node.key != 0
+                else ("none" if len(arguments) <= 1 else "*")
+            )
+            step = f"{gname}={bname}"
+            next_steps = [*current_steps, step]
+
+            if node.is_leaf or not node.children:
+                if node.audio_node_id != 0:
+                    path_str = " > ".join(next_steps)
+                    paths.setdefault(node.audio_node_id, []).append(path_str)
+                return
+
+            for ch in node.children:
+                _walk(ch, depth + 1, next_steps)
+
+        for top_child in root.children:
+            _walk(top_child, 0, [])
+    elif getattr(tree, "nodes", None):
+        # Fallback for synthetic/flat test structures
+        for n in tree.nodes:
+            if n.is_leaf and n.audio_node_id != 0:
+                gid = arguments[0][0] if arguments else 0
+                gname = resolve_hash_name(gid, bank, sound_db=sound_db) or (
+                    f"0x{gid:08X}" if gid else "0x00000000"
+                )
+                bname = (
+                    (resolve_hash_name(n.key, bank, sound_db=sound_db) or f"0x{n.key:08X}")
+                    if n.key != 0
+                    else "none"
+                )
+                step = f"{gname}={bname}"
+                paths.setdefault(n.audio_node_id, []).append(step)
+
+    return {nid: list(dict.fromkeys(plist)) for nid, plist in paths.items()}
+
+
 class GraphHierarchyProvider:
     """Propagates parent event/container metadata down to leaf CAkSound and embedded WEM nodes."""
 
@@ -347,12 +411,31 @@ class GraphHierarchyProvider:
         if isinstance(obj, CAkSound):
             parent_event = self._find_ancestor_event_name(obj.id, graph_index, bank, ctx)
             wid = getattr(obj, "source_id", 0) or getattr(obj, "file_id", 0)
+            switch_path, context_summary = self._resolve_music_switch_context(
+                obj.id, graph_index, bank, ctx.sound_db
+            )
             if parent_event:
+                details = f"Event: {parent_event} • Media: {wid}"
+                if switch_path:
+                    details = f"{details} • Switch: {switch_path}"
                 return NodeMetadataInfo(
                     friendly_label=f"{parent_event} [Sound]",
                     category="Sound",
-                    friendly_details=f"Event: {parent_event} • Media: {wid}",
+                    friendly_details=details,
                     event_name=parent_event,
+                    switch_path=switch_path,
+                    context_summary=context_summary,
+                )
+            if switch_path:
+                details = (
+                    f"Switch: {switch_path} • Media: {wid}" if wid else f"Switch: {switch_path}"
+                )
+                return NodeMetadataInfo(
+                    friendly_label=None,
+                    category="Sound",
+                    friendly_details=details,
+                    switch_path=switch_path,
+                    context_summary=context_summary,
                 )
             if wid:
                 resolved_wem = resolve_hash_name(wid, bank, sound_db=ctx.sound_db)
@@ -364,17 +447,58 @@ class GraphHierarchyProvider:
                     )
         elif isinstance(obj, CAkRanSeqCntr):
             parent_event = self._find_ancestor_event_name(obj.id, graph_index, bank, ctx)
+            switch_path, context_summary = self._resolve_music_switch_context(
+                obj.id, graph_index, bank, ctx.sound_db
+            )
+            count = len(obj.children)
             if parent_event:
-                count = len(obj.children)
+                details = f"Event: {parent_event} • {count} variations"
+                if switch_path:
+                    details = f"{details} • Switch: {switch_path}"
                 return NodeMetadataInfo(
                     friendly_label=f"{parent_event} (Container)",
                     category="Container",
-                    friendly_details=f"Event: {parent_event} • {count} variations",
+                    friendly_details=details,
                     event_name=parent_event,
+                    switch_path=switch_path,
+                    context_summary=context_summary,
+                )
+            if switch_path:
+                return NodeMetadataInfo(
+                    friendly_label=None,
+                    category="Container",
+                    friendly_details=f"Switch: {switch_path} • {count} variations",
+                    switch_path=switch_path,
+                    context_summary=context_summary,
                 )
         elif isinstance(
-            obj, (CAkMusicTrack, CAkMusicSegment, CAkMusicRanSeqCntr, CAkMusicSwitchCntr)
+            obj,
+            (
+                CAkMusicTrack,
+                CAkMusicSegment,
+                CAkMusicRanSeqCntr,
+                CAkMusicSwitchCntr,
+                CAkDialogueEvent,
+            ),
         ):
+            switch_path, context_summary = self._resolve_music_switch_context(
+                obj.id, graph_index, bank, ctx.sound_db
+            )
+            if switch_path:
+                details = (
+                    f"Switch: {switch_path}"
+                    if switch_path != "Transition Bridge"
+                    else "Transition Bridge"
+                )
+                category = "Dialogue" if isinstance(obj, CAkDialogueEvent) else "Music"
+                return NodeMetadataInfo(
+                    friendly_label=None,
+                    category=category,
+                    friendly_details=details,
+                    switch_path=switch_path,
+                    context_summary=context_summary,
+                )
+        else:
             switch_path, context_summary = self._resolve_music_switch_context(
                 obj.id, graph_index, bank, ctx.sound_db
             )
@@ -386,7 +510,7 @@ class GraphHierarchyProvider:
                 )
                 return NodeMetadataInfo(
                     friendly_label=None,
-                    category="Music",
+                    category=None,
                     friendly_details=details,
                     switch_path=switch_path,
                     context_summary=context_summary,
@@ -400,7 +524,7 @@ class GraphHierarchyProvider:
         bank: SoundBank,
         sound_db: Any | None,
     ) -> tuple[str | None, str | None]:
-        """Traces parent CAkMusicSwitchCntr decision-tree paths or transition rules for a music object."""
+        """Traces parent CAkMusicSwitchCntr and CAkDialogueEvent decision-tree paths or transition rules for a node."""
         paths: list[str] = []
 
         def dfs(curr_id: int, current_steps: list[str], visited: frozenset[int]) -> None:
@@ -430,20 +554,18 @@ class GraphHierarchyProvider:
                                     break
                         if is_trans_bridge:
                             new_steps.append("Transition Bridge")
-                if isinstance(p_obj, CAkMusicSwitchCntr) and hasattr(p_obj, "tree"):
-                    for n in p_obj.tree.nodes:
-                        if n.is_leaf and n.audio_node_id == curr_id:
-                            gid = p_obj.arguments[0][0] if p_obj.arguments else 0
-                            gname = resolve_hash_name(gid, bank, sound_db=sound_db) or str(gid)
-                            bname = (
-                                resolve_hash_name(n.key, bank, sound_db=sound_db)
-                                if n.key != 0
-                                else "none"
-                            )
-                            step = f"{gname}={bname}"
-                            if not new_steps or new_steps[-1] != step:
-                                new_steps.append(step)
-                            break
+                if isinstance(p_obj, (CAkMusicSwitchCntr, CAkDialogueEvent)) and hasattr(
+                    p_obj, "tree"
+                ):
+                    dt_paths = resolve_decision_tree_paths(p_obj, bank, sound_db=sound_db)
+                    matched_paths = dt_paths.get(curr_id, [])
+                    if matched_paths:
+                        for p in matched_paths:
+                            branch_steps = list(new_steps)
+                            if not branch_steps or branch_steps[-1] != p:
+                                branch_steps.append(p)
+                            dfs(pid, branch_steps, new_visited)
+                        continue
                 dfs(pid, new_steps, new_visited)
 
         dfs(node_id, [], frozenset())
@@ -451,7 +573,8 @@ class GraphHierarchyProvider:
         if not unique_paths:
             return None, None
         primary_path = unique_paths[0]
-        return primary_path, primary_path
+        context_summary = "; ".join(unique_paths) if len(unique_paths) > 1 else primary_path
+        return primary_path, context_summary
 
     def resolve_media(
         self,
@@ -504,7 +627,7 @@ class GraphHierarchyProvider:
                 return ctx.event_names_by_object_id[curr]
 
             obj = graph_index.objects_by_id.get(curr)
-            if isinstance(obj, CAkEvent):
+            if isinstance(obj, (CAkEvent, CAkDialogueEvent)):
                 ev_name = resolve_hash_name(obj.id, bank, sound_db=ctx.sound_db)
                 if ev_name:
                     ctx.event_names_by_object_id[obj.id] = ev_name

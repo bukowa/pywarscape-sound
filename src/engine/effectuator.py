@@ -5,11 +5,12 @@ Dispatches effect intents to disk I/O, audio conversion, and AST mutations.
 
 from __future__ import annotations
 
+import copy
 import logging
 from dataclasses import dataclass
 from typing import Any, assert_never
 
-from src.bnk.models import CAkSound
+from src.bnk.models import AkPlaylistItem, CAkRanSeqCntr, CAkSound, NodeBaseParams
 from src.bnk.wem import WemFormatTag, build_silent_pcm_wem_bytes, parse_wem_header
 from src.compiler.converter import AudioConverter
 from src.engine.ontology import (
@@ -22,6 +23,7 @@ from src.engine.ontology import (
     StageMasterAudioIntent,
     SyncMusicTimelineIntent,
     UpdateMusicTrackNodeIntent,
+    UpdateNodeParamsIntent,
     UpdateSoundNodeIntent,
 )
 from src.engine.planner import (
@@ -294,10 +296,129 @@ def execute_mutation_plan(
 
                         parent_seg.duration = new_seg_ms
 
+                case UpdateNodeParamsIntent():
+                    obj = None
+                    hirc = getattr(bank, "hirc", None)
+                    if hirc is not None:
+                        for o in getattr(hirc, "objects", ()):
+                            if getattr(o, "id", None) == intent.node_id:
+                                obj = o
+                                break
+                    if obj is None and hasattr(bank, "get_object"):
+                        obj = bank.get_object(intent.node_id)
+                    if obj is None and hasattr(bank, "objects") and isinstance(bank.objects, dict):
+                        obj = bank.objects.get(intent.node_id)
+                    if obj is None and isinstance(bank, dict):
+                        obj = bank.get(intent.node_id)
+
+                    if obj is None:
+                        errors.append(f"Node {intent.node_id} not found in bank")
+                    else:
+                        nb = (
+                            getattr(obj, "node_base_params", None)
+                            or getattr(
+                                getattr(obj, "music_node_params", None), "node_base_params", None
+                            )
+                            or getattr(getattr(obj, "trans_params", None), "node_base_params", None)
+                        )
+                        if nb is None:
+                            errors.append(f"Node {intent.node_id} does not support NodeBaseParams")
+                        else:
+                            if intent.volume_db is not None:
+                                if abs(intent.volume_db) < 1e-6:
+                                    nb.props.pop(0, None)
+                                else:
+                                    nb.props[0] = float(intent.volume_db)
+                            if intent.pitch_cents is not None:
+                                if abs(intent.pitch_cents) < 1e-6:
+                                    nb.props.pop(2, None)
+                                else:
+                                    nb.props[2] = float(intent.pitch_cents)
+                            nb.props = dict(sorted(nb.props.items()))
+
                 case AppendVariationIntent():
-                    errors.append(
-                        f"Effect intent AppendVariationIntent not yet supported: {intent}"
-                    )
+                    cntr = None
+                    hirc = getattr(bank, "hirc", None)
+                    if hirc is not None:
+                        for o in getattr(hirc, "objects", ()):
+                            if getattr(o, "id", None) == intent.container_id:
+                                cntr = o
+                                break
+                    if cntr is None and hasattr(bank, "objects") and isinstance(bank.objects, dict):
+                        cntr = bank.objects.get(intent.container_id)
+                    if cntr is None and isinstance(bank, dict):
+                        cntr = bank.get(intent.container_id)
+
+                    if cntr is None or not isinstance(cntr, CAkRanSeqCntr):
+                        errors.append(f"RanSeqCntr {intent.container_id} not found in bank")
+                    else:
+                        existing_sound = None
+                        if hirc is not None:
+                            for o in getattr(hirc, "objects", ()):
+                                if getattr(o, "id", None) == intent.child_sound_id and isinstance(
+                                    o, CAkSound
+                                ):
+                                    existing_sound = o
+                                    break
+                        if (
+                            existing_sound is None
+                            and hasattr(bank, "objects")
+                            and isinstance(bank.objects, dict)
+                        ):
+                            s = bank.objects.get(intent.child_sound_id)
+                            if isinstance(s, CAkSound):
+                                existing_sound = s
+
+                        if existing_sound is None:
+                            first_child_sound = None
+                            if hirc is not None:
+                                for cid in cntr.children:
+                                    for o in getattr(hirc, "objects", ()):
+                                        if getattr(o, "id", None) == cid and isinstance(
+                                            o, CAkSound
+                                        ):
+                                            first_child_sound = o
+                                            break
+                                    if first_child_sound is not None:
+                                        break
+
+                            if first_child_sound is not None and hasattr(
+                                first_child_sound, "node_base_params"
+                            ):
+                                nb = copy.deepcopy(first_child_sound.node_base_params)
+                            else:
+                                nb = NodeBaseParams(direct_parent_id=cntr.id)
+                            nb.direct_parent_id = cntr.id
+
+                            pl_id = staged_plugin_ids.get(intent.wem_id, intent.plugin_id)
+                            new_sound = CAkSound(
+                                id=intent.child_sound_id,
+                                obj_type=2,
+                                plugin_id=pl_id,
+                                stream_type=2,
+                                source_id=intent.wem_id,
+                                file_id=intent.wem_id,
+                                file_offset=0,
+                                in_memory_media_size=0,
+                                source_bits=0,
+                                plugin_params=b"",
+                                node_base_params=nb,
+                            )
+
+                            if hirc is not None and hasattr(hirc, "objects"):
+                                try:
+                                    cntr_idx = hirc.objects.index(cntr)
+                                    hirc.objects.insert(cntr_idx, new_sound)
+                                except ValueError:
+                                    hirc.objects.append(new_sound)
+                            if hasattr(bank, "objects") and isinstance(bank.objects, dict):
+                                bank.objects[intent.child_sound_id] = new_sound
+
+                        if intent.child_sound_id not in cntr.children:
+                            cntr.children.append(intent.child_sound_id)
+                        cntr.playlist.append(
+                            AkPlaylistItem(play_id=intent.child_sound_id, weight=intent.weight)
+                        )
 
                 case _ as unreachable:
                     assert_never(unreachable)

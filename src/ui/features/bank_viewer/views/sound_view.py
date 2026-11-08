@@ -2,6 +2,7 @@
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
+    QDoubleSpinBox,
     QFrame,
     QHBoxLayout,
     QHeaderView,
@@ -37,6 +38,7 @@ class SoundInspectorView(QWidget):
     jump_requested = Signal(str)
     reference_media_requested = Signal(int, int)
     export_requested = Signal(int)
+    node_params_changed = Signal(int, float, float)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -113,6 +115,47 @@ class SoundInspectorView(QWidget):
         btn_row.addWidget(self.btn_export)
 
         sc_layout.addLayout(btn_row)
+
+        # Tuning Controls Row (Volume dB & Pitch cents)
+        tuning_row = QHBoxLayout()
+        tuning_row.setSpacing(6)
+
+        lbl_vol = QLabel("Vol:")
+        lbl_vol.setStyleSheet(f"color: {COLOR_TEXT_SECONDARY}; font-size: 11px;")
+        tuning_row.addWidget(lbl_vol)
+
+        spin_style = (
+            f"QDoubleSpinBox {{ background-color: {COLOR_BG_INPUT}; color: {COLOR_TEXT_PRIMARY}; "
+            f"border: 1px solid {COLOR_BORDER}; border-radius: 3px; font-size: 11px; padding: 2px 4px; }}"
+        )
+
+        self.spin_volume = QDoubleSpinBox()
+        self.spin_volume.setStyleSheet(spin_style)
+        self.spin_volume.setRange(-48.0, 24.0)
+        self.spin_volume.setSingleStep(0.5)
+        self.spin_volume.setSuffix(" dB")
+        self.spin_volume.setValue(0.0)
+        tuning_row.addWidget(self.spin_volume)
+
+        lbl_pitch = QLabel("Pitch:")
+        lbl_pitch.setStyleSheet(f"color: {COLOR_TEXT_SECONDARY}; font-size: 11px;")
+        tuning_row.addWidget(lbl_pitch)
+
+        self.spin_pitch = QDoubleSpinBox()
+        self.spin_pitch.setStyleSheet(spin_style)
+        self.spin_pitch.setRange(-2400.0, 2400.0)
+        self.spin_pitch.setSingleStep(50.0)
+        self.spin_pitch.setSuffix(" cents")
+        self.spin_pitch.setValue(0.0)
+        tuning_row.addWidget(self.spin_pitch)
+
+        self.btn_apply_tuning = QPushButton("Apply Tuning")
+        self.btn_apply_tuning.setStyleSheet(BTN_STYLE_SECONDARY)
+        self.btn_apply_tuning.setEnabled(False)
+        self.btn_apply_tuning.clicked.connect(self._on_apply_tuning_clicked)
+        tuning_row.addWidget(self.btn_apply_tuning)
+
+        sc_layout.addLayout(tuning_row)
         layout.addWidget(self.source_card)
 
         # Audio References Section (Cross-Bank WEM References)
@@ -166,6 +209,14 @@ class SoundInspectorView(QWidget):
         if self._current_sound_id is not None:
             self.export_requested.emit(self._current_sound_id)
 
+    def _on_apply_tuning_clicked(self) -> None:
+        if self._current_sound_id is not None:
+            self.node_params_changed.emit(
+                self._current_sound_id,
+                self.spin_volume.value(),
+                self.spin_pitch.value(),
+            )
+
     def _on_reference_clicked(self) -> None:
         if self._current_sound_id is None:
             return
@@ -205,6 +256,13 @@ class SoundInspectorView(QWidget):
             self.btn_reference.setEnabled(False)
             self.btn_export.setEnabled(False)
             self.btn_export.setText("Export WAV...")
+            self.spin_volume.blockSignals(True)
+            self.spin_pitch.blockSignals(True)
+            self.spin_volume.setValue(0.0)
+            self.spin_pitch.setValue(0.0)
+            self.spin_volume.blockSignals(False)
+            self.spin_pitch.blockSignals(False)
+            self.btn_apply_tuning.setEnabled(False)
             self.ref_table.setRowCount(0)
             self.prop_table.setRowCount(0)
             self.ref_table.blockSignals(False)
@@ -214,6 +272,31 @@ class SoundInspectorView(QWidget):
         self._current_sound_id = details.object_id
         self.btn_reference.setEnabled(True)
         self.btn_export.setEnabled(True)
+
+        vol = 0.0
+        pitch = 0.0
+        for p in details.properties:
+            lbl = p.label.lower().strip()
+            if "volume" in lbl or "prop 0" in lbl or "prop_0" in lbl or lbl == "0":
+                try:
+                    clean = p.value.lower().replace("db", "").strip()
+                    vol = float(clean)
+                except (ValueError, TypeError):
+                    pass
+            elif "pitch" in lbl or "prop 2" in lbl or "prop_2" in lbl or lbl == "2":
+                try:
+                    clean = p.value.lower().replace("cents", "").strip()
+                    pitch = float(clean)
+                except (ValueError, TypeError):
+                    pass
+
+        self.spin_volume.blockSignals(True)
+        self.spin_pitch.blockSignals(True)
+        self.spin_volume.setValue(vol)
+        self.spin_pitch.setValue(pitch)
+        self.spin_volume.blockSignals(False)
+        self.spin_pitch.blockSignals(False)
+        self.btn_apply_tuning.setEnabled(True)
 
         if selected_count > 1:
             self.btn_export.setText(f"Export WAV ({selected_count})...")

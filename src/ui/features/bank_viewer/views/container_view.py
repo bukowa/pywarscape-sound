@@ -2,10 +2,12 @@
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
+    QFileDialog,
     QFrame,
     QHBoxLayout,
     QHeaderView,
     QLabel,
+    QPushButton,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -14,6 +16,7 @@ from PySide6.QtWidgets import (
 
 from src.ui.features.bank_viewer.state import NodeInspectorDetails
 from src.ui.theme import (
+    BTN_STYLE_SECONDARY,
     COLOR_BG_INPUT,
     COLOR_BG_PANEL,
     COLOR_BORDER,
@@ -29,9 +32,11 @@ class ContainerInspectorView(QWidget):
     """Dedicated inspector view for container nodes displaying playlist/routing and children."""
 
     jump_requested = Signal(str)
+    append_variation_requested = Signal(int, str)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        self._current_container_id: int | None = None
         self._init_ui()
 
     def _init_ui(self) -> None:
@@ -78,6 +83,13 @@ class ContainerInspectorView(QWidget):
         info_row.addWidget(self.lbl_children_count)
         info_row.addStretch()
         sc_layout.addLayout(info_row)
+
+        self.btn_add_variation = QPushButton("Add Variation WAV...")
+        self.btn_add_variation.setStyleSheet(BTN_STYLE_SECONDARY)
+        self.btn_add_variation.clicked.connect(self._on_add_variation_clicked)
+        self.btn_add_variation.setVisible(False)
+        sc_layout.addWidget(self.btn_add_variation)
+
         layout.addWidget(self.summary_card)
 
         # Primary Routing / Playlist Table
@@ -152,12 +164,26 @@ class ContainerInspectorView(QWidget):
             if target_key:
                 self.jump_requested.emit(target_key)
 
+    def _on_add_variation_clicked(self) -> None:
+        if self._current_container_id is None:
+            return
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select Audio File for Variation",
+            "",
+            "Audio Files (*.wav *.mp3 *.ogg *.flac);;All Files (*.*)",
+        )
+        if file_path:
+            self.append_variation_requested.emit(self._current_container_id, file_path)
+
     def render(self, details: NodeInspectorDetails | None) -> None:
         """Projects container details with strict signal blocking."""
         self.routing_table.blockSignals(True)
         self.child_table.blockSignals(True)
 
         if details is None:
+            self._current_container_id = None
+            self.btn_add_variation.setVisible(False)
             self.sc_title.setText("Container Routing")
             self.lbl_primary.setText("Group: -")
             self.lbl_secondary.setText("Default: -")
@@ -170,6 +196,10 @@ class ContainerInspectorView(QWidget):
             self.routing_table.blockSignals(False)
             self.child_table.blockSignals(False)
             return
+
+        self._current_container_id = details.object_id
+        is_ran_seq = details.ran_seq_semantics is not None and details.object_type == "RanSeqCntr"
+        self.btn_add_variation.setVisible(is_ran_seq)
 
         c_count = str(len(details.child_references))
         self.lbl_children_count.setText(f"Children: {c_count}")

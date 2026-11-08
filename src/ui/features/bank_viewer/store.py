@@ -453,6 +453,74 @@ class BankViewerStore:
                 self.select_node(prev_node)
         return res
 
+    def revert_node(self, node_key: str) -> bool:
+        """Reverts a single node to baseline and refreshes project and active bank."""
+        if not self._state.selected_bank_name:
+            return False
+        bank_name = self._state.selected_bank_name
+        prev_node = self._state.selected_node_key
+        res = self._session.revert_node_to_baseline(bank_name, node_key)
+        if self._state.selected_bank_name:
+            self._dispatch(BankCacheInvalidated(bank_name=self._state.selected_bank_name))
+        if self._session.project is not None:
+            self.load_project(self._session.project)
+        if self._state.selected_bank_name:
+            self.select_bank(self._state.selected_bank_name)
+            if prev_node:
+                self.select_node(prev_node)
+        return res
+
+    def update_node_params(self, node_id: int, volume_db: float, pitch_cents: float) -> bool:
+        """Updates node volume and pitch parameters via session if supported."""
+        if not self._state.selected_bank_name:
+            return False
+        try:
+            from src.engine.ontology import NodeParamsSource  # type: ignore[attr-defined]
+        except ImportError:
+            return False
+
+        from src.engine.ontology import BatchItem, MutationBatch, SoundNodeTarget
+
+        bank_name = self._state.selected_bank_name
+        target = SoundNodeTarget(bank_name=bank_name, sound_id=node_id)
+        source = NodeParamsSource(volume_db=volume_db, pitch_cents=pitch_cents)
+        batch = MutationBatch(
+            description=f"Update parameters for node {node_id}",
+            items=(BatchItem(target=target, source=source),),
+        )
+        outcome = self._session.apply_batch(batch)
+        return outcome.applied > 0
+
+    def append_container_variation(self, container_id: int, file_path: Path | str) -> bool:
+        """Appends a new audio variation to a container node."""
+        if not self._state.selected_bank_name:
+            return False
+        from src.engine.ontology import (
+            BatchItem,
+            ContainerVariationTarget,
+            ExternalFileSource,
+            MutationBatch,
+        )
+
+        bank_name = self._state.selected_bank_name
+        target = ContainerVariationTarget(bank_name=bank_name, container_id=container_id)
+        source = ExternalFileSource(file_path=Path(file_path))
+        batch = MutationBatch(
+            description=f"Append variation to container {container_id}",
+            items=(BatchItem(target=target, source=source),),
+        )
+        outcome = self._session.apply_batch(batch)
+        if outcome.applied > 0:
+            if self._session.project is not None:
+                self.load_project(self._session.project)
+            for b_name in outcome.touched_banks:
+                entry = self._session.get_loaded_entry(b_name)
+                if entry is not None:
+                    bank, _, diff_res = entry
+                    self.load_soundbank_instance(b_name, bank, diff_result=diff_res)
+            return True
+        return False
+
     def invalidate_caches(self) -> None:
         """Wipes all cached parsed bank trees and details."""
         self._dispatch(ViewerCachesInvalidated())

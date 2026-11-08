@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
 from src.engine.ontology import (
     BatchItem,
+    ExternalFileSource,
     MediaNodeTarget,
     MusicTrackTarget,
     MutationBatch,
@@ -19,7 +20,8 @@ from src.engine.ontology import (
     SoundNodeTarget,
 )
 from src.models import AudioCatalogEntry
-from src.ui.features.audio_sources.state import AudioEnhanceSettings
+from src.ui.features.audio_sources.causation import build_batch
+from src.ui.features.audio_sources.state import ApplyMode, AudioEnhanceSettings
 from src.ui.features.audio_sources.store import AudioSourcesStore
 from src.ui.features.audio_transport.store import AudioTransportStore
 from src.ui.features.audio_transport.structs import (
@@ -238,24 +240,62 @@ class WorkspaceCoordinator:
 
         return False
 
-    def _resolve_targets_from_selection(
-        self, bv_state: BankViewerState
+    def handle_source_dropped(
+        self, paths: tuple[str, ...] | Sequence[str], target_node_key: str
+    ) -> None:
+        """Handles audio files dropped onto a SoundBank hierarchy tree node."""
+        if not paths or not self.bank_viewer_store.state.selected_bank_name:
+            return
+
+        current_keys = self.bank_viewer_store.state.selected_node_keys
+        if target_node_key and target_node_key not in current_keys:
+            self.bank_viewer_store.select_node(target_node_key)
+            target_keys: Sequence[str] = (target_node_key,)
+        elif target_node_key and target_node_key in current_keys and len(current_keys) > 1:
+            target_keys = current_keys
+        elif target_node_key:
+            target_keys = (target_node_key,)
+        elif current_keys:
+            target_keys = current_keys
+        else:
+            return
+
+        targets = self._resolve_targets_from_keys(self.bank_viewer_store.state, target_keys)
+        if not targets:
+            return
+
+        sources = tuple(ExternalFileSource(file_path=Path(p)) for p in paths if p)
+        if not sources:
+            return
+
+        mode = ApplyMode.DISTRIBUTE if len(sources) > 1 and len(targets) > 1 else ApplyMode.ALL
+        batch, _ = build_batch(targets, sources, mode)
+        if batch is not None:
+            self._handle_audio_sources_batch(batch)
+
+    def _resolve_targets_from_keys(
+        self, bv_state: BankViewerState, keys: Sequence[str]
     ) -> tuple[MutationTarget, ...]:
-        """Resolves target descriptors from selected nodes in BankViewerState."""
+        """Resolves target descriptors from specific node keys in BankViewerState, traversing container descendants."""
         if not bv_state.selected_bank_name:
             return ()
         bank_name = bv_state.selected_bank_name
-        keys = bv_state.selected_node_keys or (
-            (bv_state.selected_node_key,) if bv_state.selected_node_key else ()
-        )
         targets: list[MutationTarget] = []
+        seen_targets: set[MutationTarget] = set()
+
+        entry = self.bank_viewer_store.session.get_loaded_entry(bank_name)
+        graph_index = entry[1] if entry is not None else None
+
         for key in keys:
             if not key:
                 continue
             if key.startswith("media:"):
                 try:
                     wem_id = int(key.removeprefix("media:"))
-                    targets.append(MediaNodeTarget(bank_name=bank_name, wem_id=wem_id))
+                    target = MediaNodeTarget(bank_name=bank_name, wem_id=wem_id)
+                    if target not in seen_targets:
+                        seen_targets.add(target)
+                        targets.append(target)
                 except ValueError:
                     pass
             elif key.startswith("hirc:"):
@@ -275,38 +315,181 @@ class WorkspaceCoordinator:
                         continue
 
                     parent_seg_id = self._find_parent_segment_id(bank_name, track_id)
-                    targets.append(
-                        MusicTrackTarget(
-                            bank_name=bank_name,
-                            track_id=track_id,
-                            parent_segment_id=parent_seg_id,
-                            source_index=source_index,
-                        )
+                    target = MusicTrackTarget(
+                        bank_name=bank_name,
+                        track_id=track_id,
+                        parent_segment_id=parent_seg_id,
+                        source_index=source_index,
                     )
+                    if target not in seen_targets:
+                        seen_targets.add(target)
+                        targets.append(target)
                     continue
 
                 # Standard HIRC node syntax: "hirc:<id>"
                 node = bv_state.nodes_by_key.get(key)
-                if node is not None and node.type_str not in ("Sound", "MusicTrack"):
-                    continue
-                try:
-                    raw_id = node.id_str if (node and node.id_str) else key.removeprefix("hirc:")
-                    hirc_id = int(raw_id)
-                    if self._is_music_track(bank_name, hirc_id, node):
-                        parent_seg_id = self._find_parent_segment_id(bank_name, hirc_id)
-                        targets.append(
-                            MusicTrackTarget(
+                if node is None:
+                    # Headless fallback when nodes_by_key is empty or node is unindexed
+                    try:
+                        raw_id = key.removeprefix("hirc:")
+                        hirc_id = int(raw_id)
+                        if self._is_music_track(bank_name, hirc_id, None):
+                            parent_seg_id = self._find_parent_segment_id(bank_name, hirc_id)
+                            target = MusicTrackTarget(
                                 bank_name=bank_name,
                                 track_id=hirc_id,
                                 parent_segment_id=parent_seg_id,
                                 source_index=0,
                             )
+                        else:
+                            target = SoundNodeTarget(bank_name=bank_name, sound_id=hirc_id)
+                        if target not in seen_targets:
+                            seen_targets.add(target)
+                            targets.append(target)
+                    except ValueError:
+                        pass
+                    continue
+
+                if node.type_str in ("Sound", "MusicTrack"):
+                    try:
+                        raw_id = (
+                            node.id_str if (node and node.id_str) else key.removeprefix("hirc:")
                         )
-                    else:
-                        targets.append(SoundNodeTarget(bank_name=bank_name, sound_id=hirc_id))
-                except ValueError:
-                    pass
+                        hirc_id = int(raw_id)
+                        if self._is_music_track(bank_name, hirc_id, node):
+                            parent_seg_id = self._find_parent_segment_id(bank_name, hirc_id)
+                            target = MusicTrackTarget(
+                                bank_name=bank_name,
+                                track_id=hirc_id,
+                                parent_segment_id=parent_seg_id,
+                                source_index=0,
+                            )
+                        else:
+                            target = SoundNodeTarget(bank_name=bank_name, sound_id=hirc_id)
+                        if target not in seen_targets:
+                            seen_targets.add(target)
+                            targets.append(target)
+                    except ValueError:
+                        pass
+                else:
+                    # Parent Container / Event / Action / Mixer: traverse descendants
+                    visited: set[str] = {key}
+                    queue: list[str] = list(node.child_keys)
+                    if not queue and graph_index is not None:
+                        try:
+                            hid = int(node.id_str if node.id_str else key.removeprefix("hirc:"))
+                            queue = [f"hirc:{cid}" for cid in graph_index.get_child_ids(hid)]
+                        except ValueError:
+                            queue = []
+
+                    while queue:
+                        curr_key = queue.pop(0)
+                        if curr_key in visited:
+                            continue
+                        visited.add(curr_key)
+
+                        curr_node = bv_state.nodes_by_key.get(curr_key)
+                        if curr_node is not None:
+                            if curr_node.type_str == "Sound":
+                                try:
+                                    sid = int(
+                                        curr_node.id_str
+                                        if curr_node.id_str
+                                        else curr_key.removeprefix("hirc:")
+                                    )
+                                    target = SoundNodeTarget(bank_name=bank_name, sound_id=sid)
+                                    if target not in seen_targets:
+                                        seen_targets.add(target)
+                                        targets.append(target)
+                                except ValueError:
+                                    pass
+                            elif curr_node.type_str == "MusicTrack" or self._is_music_track(
+                                bank_name,
+                                int(
+                                    curr_node.id_str
+                                    if curr_node.id_str
+                                    else curr_key.removeprefix("hirc:")
+                                ),
+                                curr_node,
+                            ):
+                                try:
+                                    tid = int(
+                                        curr_node.id_str
+                                        if curr_node.id_str
+                                        else curr_key.removeprefix("hirc:")
+                                    )
+                                    p_seg = self._find_parent_segment_id(bank_name, tid)
+                                    target = MusicTrackTarget(
+                                        bank_name=bank_name,
+                                        track_id=tid,
+                                        parent_segment_id=p_seg,
+                                        source_index=0,
+                                    )
+                                    if target not in seen_targets:
+                                        seen_targets.add(target)
+                                        targets.append(target)
+                                except ValueError:
+                                    pass
+                            else:
+                                next_keys = curr_node.child_keys
+                                if not next_keys and graph_index is not None:
+                                    try:
+                                        chid = int(
+                                            curr_node.id_str
+                                            if curr_node.id_str
+                                            else curr_key.removeprefix("hirc:")
+                                        )
+                                        next_keys = tuple(
+                                            f"hirc:{cid}" for cid in graph_index.get_child_ids(chid)
+                                        )
+                                    except ValueError:
+                                        next_keys = ()
+                                for nk in next_keys:
+                                    if nk not in visited:
+                                        queue.append(nk)
+                        elif graph_index is not None and curr_key.startswith("hirc:"):
+                            try:
+                                chid = int(curr_key.removeprefix("hirc:"))
+                                if self._is_music_track(bank_name, chid, None):
+                                    p_seg = self._find_parent_segment_id(bank_name, chid)
+                                    target = MusicTrackTarget(
+                                        bank_name=bank_name,
+                                        track_id=chid,
+                                        parent_segment_id=p_seg,
+                                        source_index=0,
+                                    )
+                                    if target not in seen_targets:
+                                        seen_targets.add(target)
+                                        targets.append(target)
+                                else:
+                                    obj = graph_index.objects_by_id.get(chid)
+                                    if obj is not None and (
+                                        getattr(obj, "obj_type", None) == 2
+                                        or obj.__class__.__name__ == "CAkSound"
+                                    ):
+                                        target = SoundNodeTarget(bank_name=bank_name, sound_id=chid)
+                                        if target not in seen_targets:
+                                            seen_targets.add(target)
+                                            targets.append(target)
+                                    elif obj is not None:
+                                        for ncid in graph_index.get_child_ids(chid):
+                                            nk = f"hirc:{ncid}"
+                                            if nk not in visited:
+                                                queue.append(nk)
+                            except ValueError:
+                                pass
         return tuple(targets)
+
+    def _resolve_targets_from_selection(
+        self, bv_state: BankViewerState
+    ) -> tuple[MutationTarget, ...]:
+        """Resolves target descriptors from selected nodes in BankViewerState."""
+        if not bv_state.selected_bank_name:
+            return ()
+        keys = bv_state.selected_node_keys or (
+            (bv_state.selected_node_key,) if bv_state.selected_node_key else ()
+        )
+        return self._resolve_targets_from_keys(bv_state, keys)
 
     def _handle_audio_sources_batch(self, batch: MutationBatch) -> None:
         """Applies mutation batch to session, updates AudioSources outcome, and refreshes touched banks."""
@@ -328,8 +511,9 @@ class WorkspaceCoordinator:
             )
             updated_items: list[BatchItem] = []
             for item in batch.items:
-                if isinstance(item.target, (SoundNodeTarget, MusicTrackTarget)) and not isinstance(
-                    item.source, SilentStubSource
+                if isinstance(item.target, (SoundNodeTarget, MusicTrackTarget)) and (
+                    self.confirm_replacement_scope is not None
+                    or not isinstance(item.source, SilentStubSource)
                 ):
                     proceed, chosen_scope = confirm_fn(item.target)
                     if not proceed:
@@ -377,6 +561,16 @@ class WorkspaceCoordinator:
         sel_bank = self.bank_viewer_store.state.selected_bank_name
         sel_key = self.bank_viewer_store.state.selected_node_key
         sel_keys = self.bank_viewer_store.state.selected_node_keys
+
+        if self.confirm_replacement_scope is not None:
+            scoped_targets: list[MutationTarget] = []
+            for target in targets:
+                proceed, _ = self.confirm_replacement_scope(target)
+                if proceed:
+                    scoped_targets.append(target)
+            targets = tuple(scoped_targets)
+            if not targets:
+                return
 
         chain = build_modifier_chain(settings)
         outcome = session.apply_audio_enhancements(targets, chain)

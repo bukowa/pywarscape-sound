@@ -10,12 +10,16 @@ logger = logging.getLogger(__name__)
 from src.bnk.bank import SoundBank
 from src.bnk.models import (
     CAkAction,
+    CAkDialogueEvent,
     CAkEvent,
+    CAkMusicRanSeqCntr,
     CAkMusicSegment,
+    CAkMusicSwitchCntr,
     CAkMusicTrack,
     CAkRanSeqCntr,
     CAkSound,
     CAkSwitchCntr,
+    DecisionTreeNode,
     HircObject,
 )
 from src.engine.diff import BankDiffResult
@@ -28,7 +32,10 @@ from src.engine.metadata_fields import (
     Provenance,
     extract_hirc_metadata,
 )
-from src.engine.metadata_resolver import CompositeMetadataResolver, ResolutionContext
+from src.engine.metadata_resolver import (
+    CompositeMetadataResolver,
+    ResolutionContext,
+)
 from src.engine.wem_metadata import resolve_wem_duration_ms
 from src.models.hashing import KNOWN_HASH_NAMES
 from src.ui.features.bank_viewer.state import (
@@ -365,6 +372,49 @@ def _build_properties_for_object(
             )
         )
 
+    elif isinstance(obj, CAkMusicSwitchCntr):
+        props.append(
+            InspectorProperty(category="Music", label="Tree Depth", value=str(obj.tree_depth))
+        )
+        grp_names = [_resolve_hash_name(gid, sound_db) for gid, _ in obj.arguments]
+        props.append(
+            InspectorProperty(
+                category="Music",
+                label="Arguments",
+                value=", ".join(grp_names) if grp_names else "None",
+            )
+        )
+        props.append(
+            InspectorProperty(category="Music", label="Mode", value=str(getattr(obj, "mode", 0)))
+        )
+
+    elif isinstance(obj, CAkMusicRanSeqCntr):
+        props.append(
+            InspectorProperty(
+                category="Music", label="Playlist Items", value=str(len(obj.playlist))
+            )
+        )
+
+    elif isinstance(obj, CAkDialogueEvent):
+        props.append(
+            InspectorProperty(
+                category="Dialogue",
+                label="Probability",
+                value=str(getattr(obj, "probability", 100)),
+            )
+        )
+        props.append(
+            InspectorProperty(category="Dialogue", label="Tree Depth", value=str(obj.tree_depth))
+        )
+        grp_names = [_resolve_hash_name(gid, sound_db) for gid, _ in obj.arguments]
+        props.append(
+            InspectorProperty(
+                category="Dialogue",
+                label="Arguments",
+                value=", ".join(grp_names) if grp_names else "None",
+            )
+        )
+
     return tuple(props)
 
 
@@ -465,13 +515,179 @@ def _build_ran_seq_semantics(
     )
 
 
+def _build_decision_tree_semantics(
+    obj: CAkMusicSwitchCntr | CAkDialogueEvent,
+    bank: SoundBank,
+    graph_index: BankGraphIndex,
+    sound_db: Any | None = None,
+) -> SwitchContainerSemantics:
+    """Constructs rich semantic descriptor for CAkMusicSwitchCntr and CAkDialogueEvent decision trees."""
+    arguments = getattr(obj, "arguments", []) or []
+    grp_parts = [_resolve_hash_name(gid, sound_db=sound_db) for gid, _ in arguments]
+    group_name = ", ".join(grp_parts) if grp_parts else "Decision Tree"
+    group_id = arguments[0][0] if arguments else 0
+    group_type = arguments[0][1] if arguments else 0
+
+    routes: list[SwitchRouteEntry] = []
+    tree = getattr(obj, "tree", None)
+
+    if tree is not None:
+        root = getattr(tree, "root", None)
+        if root and getattr(root, "children", None):
+
+            def _walk_tree(node: DecisionTreeNode, depth: int, path_segments: list[str]) -> None:
+                bname = (
+                    _resolve_hash_name(node.key, sound_db=sound_db)
+                    if node.key != 0
+                    else ("None" if len(arguments) <= 1 else "*")
+                )
+                curr_path = [*path_segments, bname]
+                if node.is_leaf or not node.children:
+                    tid = node.audio_node_id
+                    if tid != 0:
+                        branch_str = " > ".join(curr_path)
+                        target_obj = graph_index.objects_by_id.get(tid)
+                        if target_obj is not None:
+                            t_lbl = (
+                                graph_index.resolve_label(target_obj, sound_db=sound_db)
+                                or f"{type(target_obj).__name__.removeprefix('CAk')}_{target_obj.id}"
+                            )
+                            t_type, _ = _get_object_summary(target_obj)
+                        else:
+                            t_lbl = f"Object_{tid}"
+                            t_type = "Unknown"
+                        routes.append(
+                            SwitchRouteEntry(
+                                switch_id=node.key,
+                                switch_name=branch_str,
+                                target_key=f"hirc:{tid}",
+                                target_id=tid,
+                                target_name=t_lbl,
+                                target_type=t_type,
+                                is_default=False,
+                            )
+                        )
+                    return
+                for ch in node.children:
+                    _walk_tree(ch, depth + 1, curr_path)
+
+            for top_ch in root.children:
+                _walk_tree(top_ch, 0, [])
+        elif getattr(tree, "nodes", None):
+            for n in tree.nodes:
+                if n.is_leaf and n.audio_node_id != 0:
+                    tid = n.audio_node_id
+                    bname = _resolve_hash_name(n.key, sound_db=sound_db) if n.key != 0 else "None"
+                    target_obj = graph_index.objects_by_id.get(tid)
+                    if target_obj is not None:
+                        t_lbl = (
+                            graph_index.resolve_label(target_obj, sound_db=sound_db)
+                            or f"{type(target_obj).__name__.removeprefix('CAk')}_{target_obj.id}"
+                        )
+                        t_type, _ = _get_object_summary(target_obj)
+                    else:
+                        t_lbl = f"Object_{tid}"
+                        t_type = "Unknown"
+                    routes.append(
+                        SwitchRouteEntry(
+                            switch_id=n.key,
+                            switch_name=bname,
+                            target_key=f"hirc:{tid}",
+                            target_id=tid,
+                            target_name=t_lbl,
+                            target_type=t_type,
+                            is_default=False,
+                        )
+                    )
+
+    return SwitchContainerSemantics(
+        group_id=group_id,
+        group_name=group_name,
+        group_type=group_type,
+        default_switch_id=0,
+        default_switch_name="None",
+        routes=tuple(routes),
+    )
+
+
+def _build_music_ran_seq_semantics(
+    obj: CAkMusicRanSeqCntr,
+    graph_index: BankGraphIndex,
+    sound_db: Any | None = None,
+) -> RanSeqContainerSemantics:
+    """Constructs rich semantic descriptor for a CAkMusicRanSeqCntr node."""
+    raw_items = getattr(obj, "playlist", []) or []
+    items = [
+        it
+        for it in raw_items
+        if (getattr(it, "segment_id", 0) or getattr(it, "playlist_item_id", 0))
+    ]
+    if not items and raw_items:
+        items = raw_items
+
+    is_shuffle = any(getattr(it, "is_shuffle", 0) != 0 for it in items)
+    is_random = any(getattr(it, "rs_type", 0) == 1 for it in items)
+    if is_shuffle:
+        mode_str = "Random (Shuffle)"
+    elif is_random:
+        mode_str = "Random (Standard)"
+    else:
+        mode_str = "Sequence"
+
+    total_weight = sum(getattr(it, "weight", 0) for it in items)
+    playlist_entries: list[PlaylistItemEntry] = []
+    for idx, item in enumerate(items):
+        pid = getattr(item, "segment_id", 0) or getattr(item, "playlist_item_id", 0)
+        target_obj = graph_index.objects_by_id.get(pid)
+        if target_obj is not None:
+            t_lbl = (
+                graph_index.resolve_label(target_obj, sound_db=sound_db)
+                or f"{type(target_obj).__name__.removeprefix('CAk')}_{target_obj.id}"
+            )
+            t_type, _ = _get_object_summary(target_obj)
+        else:
+            t_lbl = f"Object_{pid}"
+            t_type = "Unknown"
+        wt = getattr(item, "weight", 0)
+        pct = (wt / total_weight * 100.0) if total_weight > 0 else 0.0
+        playlist_entries.append(
+            PlaylistItemEntry(
+                index=idx + 1,
+                play_id=pid,
+                target_key=f"hirc:{pid}",
+                target_name=t_lbl,
+                target_type=t_type,
+                weight=wt,
+                weight_percent=round(pct, 1),
+            )
+        )
+
+    first_item = items[0] if items else None
+    return RanSeqContainerSemantics(
+        mode_str=mode_str,
+        loop_count=getattr(first_item, "loop", 1) if first_item else 1,
+        transition_time_ms=0.0,
+        avoid_repeat_count=getattr(first_item, "avoid_repeat_count", 0) if first_item else 0,
+        playlist=tuple(playlist_entries),
+    )
+
+
 def resolve_inspector_view_type(obj: Any, node_key: str) -> InspectorViewType:
     """Maps AST object or node key to its canonical InspectorViewType."""
     if node_key.startswith("media:"):
         return InspectorViewType.MEDIA
     if isinstance(obj, CAkSound):
         return InspectorViewType.SOUND
-    if isinstance(obj, (CAkRanSeqCntr, CAkSwitchCntr)):
+    if isinstance(
+        obj,
+        (
+            CAkRanSeqCntr,
+            CAkSwitchCntr,
+            CAkMusicSwitchCntr,
+            CAkMusicRanSeqCntr,
+            CAkDialogueEvent,
+        ),
+    ):
         return InspectorViewType.CONTAINER
     if isinstance(obj, (CAkEvent, CAkAction)):
         return InspectorViewType.EVENT_ACTION
@@ -705,10 +921,15 @@ def _build_hirc_node_details(
     rs_semantics = None
     if isinstance(obj, CAkSwitchCntr):
         sw_semantics = _build_switch_semantics(obj, graph_index, sound_db=sound_db)
+    elif isinstance(obj, (CAkMusicSwitchCntr, CAkDialogueEvent)):
+        sw_semantics = _build_decision_tree_semantics(obj, bank, graph_index, sound_db=sound_db)
     elif isinstance(obj, CAkRanSeqCntr):
         rs_semantics = _build_ran_seq_semantics(obj, graph_index, sound_db=sound_db)
+    elif isinstance(obj, CAkMusicRanSeqCntr):
+        rs_semantics = _build_music_ran_seq_semantics(obj, graph_index, sound_db=sound_db)
 
     game_entities: GameEntitiesSection | None = None
+    h_meta = None
     if metadata_resolver is not None:
         res_ctx = ResolutionContext(
             bank_name=bank_name,
@@ -718,6 +939,12 @@ def _build_hirc_node_details(
         h_meta = metadata_resolver.resolve_hirc_node(obj, bank, graph_index, res_ctx)
         game_entities = _build_game_entities_section(h_meta, metadata_catalog)
 
+    props = list(_build_properties_for_object(obj, graph_index, sound_db=sound_db))
+    switch_path = h_meta.switch_path if h_meta else None
+    context_summary = h_meta.context_summary if h_meta else None
+    if switch_path:
+        props.append(InspectorProperty(category="Music", label="Play Condition", value=switch_path))
+
     return NodeInspectorDetails(
         node_key=node_key,
         name=lbl,
@@ -725,7 +952,7 @@ def _build_hirc_node_details(
         view_type=vtype,
         object_id=obj.id,
         hex_id=f"0x{obj.id:08X}",
-        properties=_build_properties_for_object(obj, graph_index, sound_db=sound_db),
+        properties=tuple(props),
         parent_keys=parent_keys,
         child_keys=child_keys,
         parent_references=parent_refs,
@@ -737,6 +964,8 @@ def _build_hirc_node_details(
         switch_semantics=sw_semantics,
         ran_seq_semantics=rs_semantics,
         game_entities=game_entities,
+        switch_path=switch_path,
+        context_summary=context_summary,
     )
 
 
@@ -825,6 +1054,21 @@ def build_details_for_node(
             ),
             InspectorProperty(category="Music", label="Parent Track ID", value=str(obj.id)),
         ]
+        h_meta = None
+        if metadata_resolver is not None:
+            res_ctx = ResolutionContext(
+                bank_name=bank_name,
+                sound_db=sound_db,
+                catalog=metadata_catalog,
+            )
+            h_meta = metadata_resolver.resolve_hirc_node(obj, bank, graph_index, res_ctx)
+        switch_path = h_meta.switch_path if h_meta else None
+        context_summary = h_meta.context_summary if h_meta else None
+        if switch_path:
+            props.append(
+                InspectorProperty(category="Music", label="Play Condition", value=switch_path)
+            )
+
         sub_name = f"Sub-track {sub_idx + 1} (WEM: {src_wem_id})"
         return NodeInspectorDetails(
             node_key=node_key,
@@ -840,6 +1084,8 @@ def build_details_for_node(
             audio_reference_count=len(audio_refs),
             is_streamed=is_streamed,
             source_wem_id=src_wem_id,
+            switch_path=switch_path,
+            context_summary=context_summary,
         )
 
     try:
@@ -1111,6 +1357,8 @@ def _build_hirc_section(
                 resolved_lbl if resolved_lbl != raw_lbl else None
             )
             h_f_det = h_meta.friendly_details if h_meta else None
+            if h_f_lbl is None and h_meta and h_meta.switch_path:
+                h_f_lbl = f"[{h_meta.switch_path}] {raw_lbl}"
 
             hirc_meta = extract_hirc_metadata(obj)
             if isinstance(obj, CAkMusicTrack):
@@ -1149,6 +1397,11 @@ def _build_hirc_section(
                             )
                         )
                     sub_name = f"Sub-track {idx + 1} (WEM: {src.source_id})"
+                    sub_f_det = (
+                        f"Source WEM: {src.source_id} | {h_f_det}"
+                        if h_f_det
+                        else f"Source WEM: {src.source_id}"
+                    )
                     nodes[sub_key] = HircTreeNode(
                         key=sub_key,
                         label=sub_name,
@@ -1158,9 +1411,11 @@ def _build_hirc_section(
                         child_keys=(),
                         is_modified=is_obj_mod,
                         friendly_label=sub_name,
-                        friendly_details=f"Source WEM: {src.source_id}",
+                        friendly_details=sub_f_det,
                         metadata=sub_meta,
-                        friendly_details_provenance=Provenance.BINARY,
+                        friendly_details_provenance=(
+                            h_meta.provenance if (h_f_det and h_meta) else Provenance.BINARY
+                        ),
                     )
                     if is_small:
                         sub_det = build_details_for_node(

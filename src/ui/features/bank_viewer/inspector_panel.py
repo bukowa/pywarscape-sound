@@ -42,6 +42,8 @@ class InspectorPanel(QWidget):
     export_sound_requested = Signal(int)
     export_media_requested = Signal(int)
     revert_media_requested = Signal(int)
+    node_params_changed = Signal(int, float, float)
+    append_variation_requested = Signal(int, str)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -153,6 +155,8 @@ class InspectorPanel(QWidget):
 
         self.sound_view.reference_media_requested.connect(self.reference_media_requested)
         self.sound_view.export_requested.connect(self.export_sound_requested)
+        self.sound_view.node_params_changed.connect(self.node_params_changed)
+        self.container_view.append_variation_requested.connect(self.append_variation_requested)
         self.music_view.export_requested.connect(self.export_sound_requested)
 
         self.media_view.export_requested.connect(self.export_media_requested)

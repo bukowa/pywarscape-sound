@@ -7,6 +7,7 @@ from collections.abc import Callable
 from typing import Any, assert_never
 
 from src.bnk.models import CAkMusicTrack, CAkSound
+from src.engine.metadata_resolver import CompositeMetadataResolver, ResolutionContext
 from src.engine.ontology import MusicTrackTarget, ReplacementScope, SoundNodeTarget
 from src.engine.session import WorkspaceSession
 from src.ui.features.blast_radius.causation import reconcile_blast_radius
@@ -144,18 +145,42 @@ def check_replacement_branch(
     if ref_count <= 1 and (not is_embedded or not prompt_on_embedded_unshared):
         return (True, ReplacementScope.OVERWRITE)
 
-    impact_items = tuple(
-        BlastRadiusImpactItem(
-            bank_name=r.bank_name,
-            node_id=r.node_id,
-            node_name=r.node_name,
-            node_type=r.node_type,
-            stream_type=r.stream_type,
-            is_embedded=r.is_embedded,
-            node_key=r.node_key,
+    resolver = CompositeMetadataResolver()
+    enriched_items: list[BlastRadiusImpactItem] = []
+    for r in refs:
+        node_name = r.node_name
+        r_entry = session.get_loaded_entry(r.bank_name)
+        if r_entry is not None:
+            r_bank, r_graph_index, _ = r_entry
+            r_obj = r_graph_index.objects_by_id.get(r.node_id)
+            if r_obj is None and r_bank.hirc:
+                for ho in r_bank.hirc.objects:
+                    if ho.id == r.node_id:
+                        r_obj = ho
+                        break
+            if r_obj is not None:
+                ctx = ResolutionContext(
+                    bank_name=r.bank_name,
+                    sound_db=getattr(session, "sound_db", None),
+                )
+                meta = resolver.resolve_hirc_node(r_obj, r_bank, r_graph_index, ctx)
+                if meta:
+                    ctx_label = meta.event_name or meta.switch_path or meta.friendly_label
+                    if ctx_label and ctx_label not in node_name:
+                        node_name = f"{node_name} ({ctx_label})"
+
+        enriched_items.append(
+            BlastRadiusImpactItem(
+                bank_name=r.bank_name,
+                node_id=r.node_id,
+                node_name=node_name,
+                node_type=r.node_type,
+                stream_type=r.stream_type,
+                is_embedded=r.is_embedded,
+                node_key=r.node_key,
+            )
         )
-        for r in refs
-    )
+    impact_items = tuple(enriched_items)
 
     mode = (
         BlastRadiusMode.PROMOTION_NOTICE if ref_count <= 1 else BlastRadiusMode.SHARED_CONFIRMATION

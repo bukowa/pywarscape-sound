@@ -138,6 +138,7 @@ class MainWindow(QMainWindow):
             audio_sources_store=self.audio_sources_store,
             audio_sources_transport_store=self.audio_sources_transport_store,
         )
+        self.bank_viewer_view.source_dropped.connect(self.coordinator.handle_source_dropped)
         self.bank_viewer_store.subscribe(self._on_bank_viewer_state_changed)
         self._saved_bv_prefs = (
             self.bank_viewer_store.state.active_overlays,

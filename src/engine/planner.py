@@ -9,9 +9,10 @@ from collections.abc import Collection, Container, Mapping
 from pathlib import Path
 from typing import Any, assert_never
 
-from src.bnk.models import CAkMusicSegment, CAkMusicTrack, CAkSound
+from src.bnk.models import CAkMusicSegment, CAkMusicTrack, CAkRanSeqCntr, CAkSound
 from src.bnk.wem import build_silent_pcm_wem_bytes
 from src.engine.ontology import (
+    AppendVariationIntent,
     AudioMutationEffectIntent,
     AudioMutationPlan,
     AudioReplacementSource,
@@ -27,6 +28,7 @@ from src.engine.ontology import (
     MusicTrackTarget,
     MutationBatch,
     MutationTarget,
+    NodeParamsSource,
     PlanRejection,
     ReplacementScope,
     SilentStubSource,
@@ -35,6 +37,7 @@ from src.engine.ontology import (
     StageMasterAudioIntent,
     SyncMusicTimelineIntent,
     UpdateMusicTrackNodeIntent,
+    UpdateNodeParamsIntent,
     UpdateSoundNodeIntent,
     WemId,
 )
@@ -233,9 +236,16 @@ def try_plan_audio_replacement(
                 bank, target, source, external_file_exists=external_file_exists
             )
         case ContainerVariationTarget():
-            return PlanRejection(
-                code="UNSUPPORTED_TARGET",
-                reason=f"Planning not implemented for target type {type(target).__name__}",
+            return _try_plan_container_variation(
+                bank,
+                target,
+                source,
+                scope=scope,
+                forked_wem_id=forked_wem_id,
+                item=item,
+                existing_wems=existing_wems,
+                reserved_wem_ids=reserved_wem_ids,
+                external_file_exists=external_file_exists,
             )
         case _ as unreachable:
             assert_never(unreachable)
@@ -312,6 +322,10 @@ def plan_batch(
                     working_reserved.add(eff.wem_id)
                 elif isinstance(eff, (UpdateSoundNodeIntent, UpdateMusicTrackNodeIntent)):
                     working_reserved.add(eff.new_source_id)
+                elif isinstance(eff, AppendVariationIntent):
+                    working_reserved.add(eff.child_sound_id)
+                    if eff.wem_id:
+                        working_reserved.add(eff.wem_id)
             if isinstance(item.source, ExternalFileSource) and effective_source == item.source:
                 if canon_path is None:
                     canon_path = item.source.file_path.resolve()
@@ -508,6 +522,27 @@ def _try_plan_sound_node_replacement(
             return PlanRejection(
                 code="UNSUPPORTED_SOURCE",
                 reason="Unsupported source type CrossBankCloneSource for CAkSound",
+            )
+
+        case NodeParamsSource():
+            effects = (
+                UpdateNodeParamsIntent(
+                    bank_name=target.bank_name,
+                    node_id=target.sound_id,
+                    volume_db=source.volume_db,
+                    pitch_cents=source.pitch_cents,
+                ),
+                MarkBankModifiedIntent(bank_name=target.bank_name),
+            )
+            desc = (
+                f"Update node params for Sound {target.sound_id} "
+                f"(volume: {source.volume_db} dB, pitch: {source.pitch_cents} cents)"
+            )
+            return AudioMutationPlan(
+                description=desc,
+                target=target,
+                source=source,
+                effects=effects,
             )
 
         case _ as unreachable:
@@ -798,6 +833,27 @@ def _try_plan_music_track_replacement(
                 reason="Unsupported source type CrossBankCloneSource for CAkMusicTrack",
             )
 
+        case NodeParamsSource():
+            effects = (
+                UpdateNodeParamsIntent(
+                    bank_name=target.bank_name,
+                    node_id=track.id,
+                    volume_db=source.volume_db,
+                    pitch_cents=source.pitch_cents,
+                ),
+                MarkBankModifiedIntent(bank_name=target.bank_name),
+            )
+            desc = (
+                f"Update node params for MusicTrack {target.track_id} "
+                f"(volume: {source.volume_db} dB, pitch: {source.pitch_cents} cents)"
+            )
+            return AudioMutationPlan(
+                description=desc,
+                target=target,
+                source=source,
+                effects=effects,
+            )
+
         case _ as unreachable:
             assert_never(unreachable)
 
@@ -869,6 +925,206 @@ def _try_plan_media_node_replacement(
             return PlanRejection(
                 code="UNSUPPORTED_SOURCE",
                 reason="Unsupported source type CrossBankCloneSource for MediaNodeTarget",
+            )
+
+        case NodeParamsSource():
+            return PlanRejection(
+                code="UNSUPPORTED_SOURCE",
+                reason="NodeParamsSource not supported for MediaNodeTarget",
+            )
+
+        case _ as unreachable:
+            assert_never(unreachable)
+
+
+def _try_plan_container_variation(
+    bank: Any,
+    target: ContainerVariationTarget,
+    source: AudioReplacementSource,
+    *,
+    scope: ReplacementScope = ReplacementScope.OVERWRITE,
+    forked_wem_id: WemId | None = None,
+    item: BatchItem | None = None,
+    existing_wems: Collection[int] | None = None,
+    reserved_wem_ids: set[int] | frozenset[int] | None = None,
+    external_file_exists: bool,
+) -> AudioMutationPlan | PlanRejection:
+    """Plans audio variation appending or node parameter override for a container."""
+    if item is not None:
+        scope = item.scope
+        if item.forked_wem_id is not None:
+            forked_wem_id = item.forked_wem_id
+
+    if target.variation_sound_id is not None:
+        return _try_plan_sound_node_replacement(
+            bank,
+            SoundNodeTarget(bank_name=target.bank_name, sound_id=target.variation_sound_id),
+            source,
+            scope=scope,
+            forked_wem_id=forked_wem_id,
+            item=item,
+            existing_wems=existing_wems,
+            reserved_wem_ids=reserved_wem_ids,
+            external_file_exists=external_file_exists,
+        )
+
+    if isinstance(source, NodeParamsSource):
+        effects = (
+            UpdateNodeParamsIntent(
+                bank_name=target.bank_name,
+                node_id=target.container_id,
+                volume_db=source.volume_db,
+                pitch_cents=source.pitch_cents,
+            ),
+            MarkBankModifiedIntent(bank_name=target.bank_name),
+        )
+        desc = (
+            f"Update node params for Container {target.container_id} "
+            f"(volume: {source.volume_db} dB, pitch: {source.pitch_cents} cents)"
+        )
+        return AudioMutationPlan(
+            description=desc,
+            target=target,
+            source=source,
+            effects=effects,
+        )
+
+    cntr = None
+    hirc = getattr(bank, "hirc", None)
+    if hirc is not None:
+        for o in getattr(hirc, "objects", ()):
+            if getattr(o, "id", None) == target.container_id:
+                cntr = o
+                break
+    if cntr is None and hasattr(bank, "objects") and isinstance(bank.objects, dict):
+        cntr = bank.objects.get(target.container_id)
+    if cntr is None and isinstance(bank, dict):
+        cntr = bank.get(target.container_id)
+
+    if cntr is None or not isinstance(cntr, CAkRanSeqCntr):
+        return PlanRejection(
+            code="CONTAINER_NOT_FOUND",
+            reason=f"RanSeqCntr {target.container_id} not found in bank {target.bank_name}",
+        )
+
+    existing_ids = collect_bank_wem_ids(bank)
+    if existing_wems is not None:
+        existing_ids = existing_ids | set(existing_wems)
+    if reserved_wem_ids is not None:
+        existing_ids = existing_ids | set(reserved_wem_ids)
+
+    hirc_ids: set[int] = set()
+    if hirc is not None:
+        for o in getattr(hirc, "objects", ()):
+            oid = getattr(o, "id", None)
+            if oid is not None:
+                hirc_ids.add(oid)
+    elif hasattr(bank, "objects") and isinstance(bank.objects, dict):
+        hirc_ids.update(bank.objects.keys())
+    elif isinstance(bank, dict):
+        hirc_ids.update(bank.keys())
+
+    all_used_ids = existing_ids | hirc_ids
+    pref_seed = target.container_id + len(getattr(cntr, "children", ())) + 1
+    child_sound_id = allocate_unique_wem_id(all_used_ids, preferred_seed=pref_seed)
+
+    match source:
+        case ExternalFileSource():
+            if not external_file_exists:
+                return PlanRejection(
+                    code="FILE_NOT_FOUND",
+                    reason=f"External audio file not found: {source.file_path}",
+                )
+
+            dest_rel = f"source_audio/{source.file_path.name}"
+            if forked_wem_id is not None:
+                wem_id = forked_wem_id
+            else:
+                wem_seed = child_sound_id + 1
+                wem_id = allocate_unique_wem_id(
+                    all_used_ids | {child_sound_id}, preferred_seed=wem_seed
+                )
+
+            effects = (
+                StageMasterAudioIntent(
+                    source_path=source.file_path,
+                    destination_rel_path=dest_rel,
+                    wem_id=wem_id,
+                ),
+                AppendVariationIntent(
+                    bank_name=target.bank_name,
+                    container_id=target.container_id,
+                    child_sound_id=child_sound_id,
+                    wem_id=wem_id,
+                    plugin_id=0x00010001,
+                ),
+                MarkBankModifiedIntent(bank_name=target.bank_name),
+            )
+            desc = (
+                f"Append new variation Sound {child_sound_id} (WEM {wem_id}) from "
+                f"{source.file_path.name} to Container {target.container_id}"
+            )
+            return AudioMutationPlan(
+                description=desc,
+                target=target,
+                source=source,
+                effects=effects,
+            )
+
+        case ExistingMediaReferenceSource():
+            effects = (
+                AppendVariationIntent(
+                    bank_name=target.bank_name,
+                    container_id=target.container_id,
+                    child_sound_id=child_sound_id,
+                    wem_id=source.wem_id,
+                    plugin_id=0x00010001,
+                ),
+                MarkBankModifiedIntent(bank_name=target.bank_name),
+            )
+            desc = (
+                f"Append new variation Sound {child_sound_id} referencing WEM {source.wem_id} "
+                f"to Container {target.container_id}"
+            )
+            return AudioMutationPlan(
+                description=desc,
+                target=target,
+                source=source,
+                effects=effects,
+            )
+
+        case SilentStubSource():
+            effects = (
+                AppendVariationIntent(
+                    bank_name=target.bank_name,
+                    container_id=target.container_id,
+                    child_sound_id=child_sound_id,
+                    wem_id=source.stub_wem_id,
+                    plugin_id=0x00010001,
+                ),
+                MarkBankModifiedIntent(bank_name=target.bank_name),
+            )
+            desc = (
+                f"Append silent variation Sound {child_sound_id} (WEM {source.stub_wem_id}) "
+                f"to Container {target.container_id}"
+            )
+            return AudioMutationPlan(
+                description=desc,
+                target=target,
+                source=source,
+                effects=effects,
+            )
+
+        case CrossBankCloneSource():
+            return PlanRejection(
+                code="UNSUPPORTED_SOURCE",
+                reason="Unsupported source type CrossBankCloneSource for ContainerVariationTarget",
+            )
+
+        case NodeParamsSource():
+            return PlanRejection(
+                code="UNEXPECTED_SOURCE",
+                reason="NodeParamsSource unexpectedly reached variation branch",
             )
 
         case _ as unreachable:

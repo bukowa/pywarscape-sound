@@ -73,8 +73,20 @@ class SilentStubSource:
     stub_wem_id: WemId = 1
 
 
+@dataclass(frozen=True, slots=True, kw_only=True)
+class NodeParamsSource:
+    """Slot-local NodeBaseParams property overrides (Volume dB = PropID 0, Pitch cents = PropID 2)."""
+
+    volume_db: float | None = None
+    pitch_cents: float | None = None
+
+
 type AudioReplacementSource = (
-    ExternalFileSource | ExistingMediaReferenceSource | CrossBankCloneSource | SilentStubSource
+    ExternalFileSource
+    | ExistingMediaReferenceSource
+    | CrossBankCloneSource
+    | SilentStubSource
+    | NodeParamsSource
 )
 
 
@@ -183,12 +195,24 @@ class SyncMusicTimelineIntent:
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class AppendVariationIntent:
-    """Intent to link a new sound node to a container playlist."""
+    """Intent to create or link a new CAkSound node into a CAkRanSeqCntr playlist."""
 
     bank_name: BankName
     container_id: HircId
     child_sound_id: HircId
+    wem_id: WemId = 0
+    plugin_id: int = 0x00010001
     weight: int = 50000
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class UpdateNodeParamsIntent:
+    """Intent to update slot-local NodeBaseParams properties (PropID 0 = Volume, PropID 2 = Pitch)."""
+
+    bank_name: BankName
+    node_id: HircId
+    volume_db: float | None = None
+    pitch_cents: float | None = None
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -216,6 +240,7 @@ type AudioMutationEffectIntent = (
     | AppendVariationIntent
     | MarkBankModifiedIntent
     | CopyMediaBytesIntent
+    | UpdateNodeParamsIntent
 )
 
 
