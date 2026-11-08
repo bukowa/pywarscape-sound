@@ -176,6 +176,9 @@ class BankViewerView(QWidget):
         super().__init__(parent)
         self.store = store
         self._expanded_keys: set[str] = set(_DEFAULT_EXPANDED_GROUPS)
+        self._expanded_paths: set[tuple[str, ...]] = {(k,) for k in _DEFAULT_EXPANDED_GROUPS}
+        self._selected_item_path: tuple[str, ...] | None = None
+        self._selected_item_paths: set[tuple[str, ...]] = set()
         self._rendered_bank_name: str | None = None
         self._rendered_root_keys: tuple[str, ...] = ()
         self._rendered_tree_search_query: str = ""
@@ -186,6 +189,7 @@ class BankViewerView(QWidget):
         self._current_nodes: dict[str, HircTreeNode] = {}
         self._items_by_key: dict[str, QTreeWidgetItem] = {}
         self._all_items_by_key: dict[str, list[QTreeWidgetItem]] = {}
+        self._items_by_path: dict[tuple[str, ...], QTreeWidgetItem] = {}
         self._init_ui()
         self._wire_signals()
 
@@ -661,19 +665,40 @@ class BankViewerView(QWidget):
         if reply == QMessageBox.StandardButton.Yes:
             self.store.revert_wem(wem_id)
 
+    @staticmethod
+    def _get_item_path(item: QTreeWidgetItem | None) -> tuple[str, ...]:
+        parts: list[str] = []
+        curr = item
+        while curr is not None:
+            k = curr.data(0, _ROLE_NODE_KEY)
+            if k:
+                parts.append(str(k))
+            curr = curr.parent()
+        parts.reverse()
+        return tuple(parts)
+
     def _on_tree_selection_changed(self, *args) -> None:
         selected_items = self.tree_widget.selectedItems()
         keys: list[str] = []
+        selected_paths: set[tuple[str, ...]] = set()
         for it in selected_items:
             k = it.data(0, _ROLE_NODE_KEY)
             if k:
                 keys.append(k)
+                p = self._get_item_path(it)
+                if p:
+                    selected_paths.add(p)
         keys_tuple = tuple(keys)
 
         current = self.tree_widget.currentItem()
         current_key = current.data(0, _ROLE_NODE_KEY) if current else None
+        current_path = self._get_item_path(current) if current else ()
         if current_key not in keys_tuple:
             current_key = keys_tuple[0] if keys_tuple else None
+            current_path = self._get_item_path(selected_items[0]) if selected_items else ()
+
+        self._selected_item_paths = selected_paths
+        self._selected_item_path = current_path if current_path else None
 
         if len(keys_tuple) > 1:
             self.store.select_nodes(keys_tuple, primary_key=current_key)
@@ -686,6 +711,9 @@ class BankViewerView(QWidget):
         key = item.data(0, _ROLE_NODE_KEY)
         if key:
             self._expanded_keys.add(key)
+        item_path = self._get_item_path(item)
+        if item_path:
+            self._expanded_paths.add(item_path)
         first_child = item.child(0)
         if (
             item.childCount() == 1
@@ -695,23 +723,29 @@ class BankViewerView(QWidget):
             item.takeChild(0)
             node = self._current_nodes.get(key)
             if node:
+                ancestor_keys = set(item_path) if item_path else ({key} if key else set())
                 self.tree_widget.setUpdatesEnabled(False)
                 try:
                     for ckey in node.child_keys:
+                        if ckey in ancestor_keys:
+                            continue
                         cnode = self._current_nodes.get(ckey)
                         if cnode:
                             if self._rendered_filter_modified_only and not (
                                 cnode.is_modified or cnode.has_modified_children
                             ):
                                 continue
-                            self._create_tree_item(item, cnode, node, {key, ckey})
+                            self._create_tree_item(item, cnode, node, ancestor_keys | {ckey})
                 finally:
                     self.tree_widget.setUpdatesEnabled(True)
 
     def _on_tree_item_collapsed(self, item: QTreeWidgetItem) -> None:
         key = item.data(0, _ROLE_NODE_KEY)
-        if key in self._expanded_keys:
-            self._expanded_keys.remove(key)
+        item_path = self._get_item_path(item)
+        if item_path in self._expanded_paths:
+            self._expanded_paths.remove(item_path)
+        if key and not any(p and p[-1] == key for p in self._expanded_paths):
+            self._expanded_keys.discard(key)
 
     def _make_row(
         self,
@@ -769,6 +803,10 @@ class BankViewerView(QWidget):
         else:
             parent.addChild(item)
 
+        item_path = self._get_item_path(item)
+        if item_path:
+            self._items_by_path[item_path] = item
+
         return item
 
     def _create_tree_item(
@@ -779,21 +817,21 @@ class BankViewerView(QWidget):
         visited: set[str],
     ) -> QTreeWidgetItem:
         item = self._make_row(parent, node, parent_node, is_direct_match=False)
+        item_path = self._get_item_path(item)
 
         if node.child_keys:
-            is_expanded = node.key in self._expanded_keys
+            is_expanded = item_path in self._expanded_paths
             if is_expanded:
                 item.setExpanded(True)
                 for ckey in node.child_keys:
                     if ckey not in visited:
-                        visited.add(ckey)
                         cnode = self._current_nodes.get(ckey)
                         if cnode:
                             if self._rendered_filter_modified_only and not (
                                 cnode.is_modified or cnode.has_modified_children
                             ):
                                 continue
-                            self._create_tree_item(item, cnode, node, visited)
+                            self._create_tree_item(item, cnode, node, visited | {ckey})
             else:
                 ph = QTreeWidgetItem(
                     ["Loading..."] + [""] * (len(self._rendered_visible_columns) - 1)
@@ -854,6 +892,34 @@ class BankViewerView(QWidget):
                     )
         return item
 
+    def _resolve_target_item_path(self, selected_key: str) -> tuple[str, ...] | None:
+        """Resolves the preferred tree path for selected_key based on current path context."""
+        if not self._selected_item_path:
+            return None
+        if self._selected_item_path[-1] == selected_key:
+            return self._selected_item_path
+        curr_end = self._selected_item_path[-1]
+        curr_node = self._current_nodes.get(curr_end)
+        if curr_node is not None and selected_key in curr_node.child_keys:
+            return (*self._selected_item_path, selected_key)
+        if len(self._selected_item_path) >= 2:
+            parent_key = self._selected_item_path[-2]
+            if parent_key == selected_key:
+                return self._selected_item_path[:-1]
+            parent_node = self._current_nodes.get(parent_key)
+            if parent_node is not None and selected_key in parent_node.child_keys:
+                return (*self._selected_item_path[:-1], selected_key)
+        return None
+
+    def _expand_path_ancestors(self, path: tuple[str, ...]) -> None:
+        """Expands all ancestor items along a specific tree path."""
+        for depth in range(1, len(path)):
+            anc_path = path[:depth]
+            aitem = self._items_by_path.get(anc_path)
+            if aitem is not None and not aitem.isExpanded():
+                aitem.setExpanded(True)
+                self._on_tree_item_expanded(aitem)
+
     def _update_tree_selection(
         self,
         selected_key: str | None,
@@ -865,28 +931,52 @@ class BankViewerView(QWidget):
             target_keys = {selected_key}
 
         if not target_keys:
+            self._selected_item_path = None
+            self._selected_item_paths.clear()
             self.tree_widget.blockSignals(True)
             self.tree_widget.setCurrentIndex(QModelIndex())
             self.tree_widget.clearSelection()
             self.tree_widget.blockSignals(False)
             return
 
+        preferred_path = self._resolve_target_item_path(selected_key) if selected_key else None
+        if preferred_path is not None and preferred_path not in self._items_by_path:
+            self._expand_path_ancestors(preferred_path)
+
+        for sel_path in list(self._selected_item_paths):
+            if sel_path and sel_path[-1] in target_keys and sel_path not in self._items_by_path:
+                self._expand_path_ancestors(sel_path)
+
         # Always expand ancestors so lazy children are created in _items_by_key.
         # This is needed regardless of ensure_visible — programmatic selection
         # (e.g. select_node("hirc:301")) must find items under collapsed categories.
         keys_needing_expansion = set()
-        if selected_key and self._items_by_key.get(selected_key) is None:
+        if (
+            selected_key
+            and (preferred_path is None or preferred_path not in self._items_by_path)
+            and self._items_by_key.get(selected_key) is None
+        ):
             keys_needing_expansion.add(selected_key)
         for k in target_keys:
-            if self._items_by_key.get(k) is None:
+            has_path_item = any(
+                p and p[-1] == k and p in self._items_by_path for p in self._selected_item_paths
+            )
+            if not has_path_item and self._items_by_key.get(k) is None:
                 keys_needing_expansion.add(k)
 
         if keys_needing_expansion:
-            # Build parent_map once for all keys
+            # Build parent_map preferring hierarchy parents over category folders
             parent_map: dict[str, str] = {}
+            cat_parent_map: dict[str, str] = {}
             for pkey, pnode in self._current_nodes.items():
                 for ckey in pnode.child_keys:
-                    parent_map[ckey] = pkey
+                    if pkey.startswith("cat:"):
+                        cat_parent_map[ckey] = pkey
+                    elif ckey not in parent_map:
+                        parent_map[ckey] = pkey
+            for ckey, cat_pkey in cat_parent_map.items():
+                if ckey not in parent_map:
+                    parent_map[ckey] = cat_pkey
 
             for expand_key in keys_needing_expansion:
                 ancestors = []
@@ -901,13 +991,34 @@ class BankViewerView(QWidget):
                 # Expand ancestors top-down so lazy children are generated
                 for anc in reversed(ancestors):
                     aitem = self._items_by_key.get(anc)
-                    if aitem is not None:
-                        if not aitem.isExpanded():
+                    if aitem is not None and not aitem.isExpanded():
+                        aitem.setExpanded(True)
+                        self._on_tree_item_expanded(aitem)
+
+                # Fallback to category folder if node was unreachable from hierarchy roots
+                if self._items_by_key.get(expand_key) is None and expand_key in cat_parent_map:
+                    cat_key = cat_parent_map[expand_key]
+                    for anc in ("group:categories", cat_key):
+                        aitem = self._items_by_key.get(anc)
+                        if aitem is not None and not aitem.isExpanded():
                             aitem.setExpanded(True)
                             self._on_tree_item_expanded(aitem)
 
         self.tree_widget.blockSignals(True)
         try:
+            primary_item: QTreeWidgetItem | None = None
+            if selected_key:
+                if preferred_path is not None:
+                    primary_item = self._items_by_path.get(preferred_path)
+                if primary_item is None:
+                    curr_item = self.tree_widget.currentItem()
+                    if curr_item is not None and curr_item.data(0, _ROLE_NODE_KEY) == selected_key:
+                        primary_item = curr_item
+                    else:
+                        primary_item = self._items_by_key.get(selected_key)
+                if primary_item is not None:
+                    self._selected_item_path = self._get_item_path(primary_item)
+
             current_selected = {
                 it.data(0, _ROLE_NODE_KEY)
                 for it in self.tree_widget.selectedItems()
@@ -915,29 +1026,41 @@ class BankViewerView(QWidget):
             }
             if current_selected != target_keys:
                 self.tree_widget.clearSelection()
+                new_selected_paths: set[tuple[str, ...]] = set()
                 for k in target_keys:
-                    all_matches = self._all_items_by_key.get(k)
-                    if all_matches:
-                        for it in all_matches:
+                    path_items = [
+                        self._items_by_path[p]
+                        for p in self._selected_item_paths
+                        if p and p[-1] == k and p in self._items_by_path
+                    ]
+                    if path_items:
+                        for it in path_items:
                             it.setSelected(True)
+                            p = self._get_item_path(it)
+                            if p:
+                                new_selected_paths.add(p)
+                    elif k == selected_key and primary_item is not None:
+                        primary_item.setSelected(True)
+                        p = self._get_item_path(primary_item)
+                        if p:
+                            new_selected_paths.add(p)
                     else:
                         it = self._items_by_key.get(k)
                         if it is not None:
                             it.setSelected(True)
+                            p = self._get_item_path(it)
+                            if p:
+                                new_selected_paths.add(p)
+                if new_selected_paths:
+                    self._selected_item_paths = new_selected_paths
 
-            if selected_key:
-                curr_item = self.tree_widget.currentItem()
-                if curr_item is not None and curr_item.data(0, _ROLE_NODE_KEY) == selected_key:
-                    primary_item = curr_item
-                else:
-                    primary_item = self._items_by_key.get(selected_key)
-
-                if primary_item is not None and primary_item != self.tree_widget.currentItem():
+            if selected_key and primary_item is not None:
+                if primary_item != self.tree_widget.currentItem():
                     self.tree_widget.setCurrentItem(
                         primary_item, 0, QItemSelectionModel.SelectionFlag.NoUpdate
                     )
 
-                if ensure_visible and primary_item is not None:
+                if ensure_visible:
                     parent = primary_item.parent()
                     while parent is not None:
                         if not parent.isExpanded():
@@ -1002,15 +1125,19 @@ class BankViewerView(QWidget):
         if tree_dirty:
             if cols_changed:
                 self._apply_tree_columns(state.visible_columns, self._rendered_visible_columns)
-            if state.selected_bank_name != self._rendered_bank_name:
+            same_bank = state.selected_bank_name == self._rendered_bank_name
+            if not same_bank:
                 self._expanded_keys = set(_DEFAULT_EXPANDED_GROUPS)
+                self._expanded_paths = {(k,) for k in _DEFAULT_EXPANDED_GROUPS}
+                self._selected_item_path = None
+                self._selected_item_paths.clear()
             self._rendered_bank_name = state.selected_bank_name
             self._rendered_root_keys = state.root_keys
             self._rendered_tree_search_query = state.tree_search_query
             self._rendered_filter_modified_only = state.filter_tree_modified_only
             self._rendered_active_overlays = state.active_overlays
             self._rendered_visible_columns = state.visible_columns
-            self._render_tree(state)
+            self._render_tree(state, preserve_scroll=same_bank)
         else:
             self._update_tree_selection(
                 state.selected_node_key,
@@ -1064,14 +1191,23 @@ class BankViewerView(QWidget):
                     return True
         return False
 
-    def _render_tree(self, state: BankViewerState) -> None:
+    def _render_tree(self, state: BankViewerState, *, preserve_scroll: bool = False) -> None:
         """Renders tree nodes with lazy expansion and query filtering."""
         self.tree_widget.blockSignals(True)
         self.tree_widget.setUpdatesEnabled(False)
         try:
+            vbar = self.tree_widget.verticalScrollBar()
+            prev_scroll_val = vbar.value() if (preserve_scroll and vbar is not None) else None
+            curr_item = self.tree_widget.currentItem()
+            if preserve_scroll and curr_item is not None:
+                c_path = self._get_item_path(curr_item)
+                if c_path and c_path[-1] == state.selected_node_key:
+                    self._selected_item_path = c_path
+
             self.tree_widget.clear()
             self._items_by_key.clear()
             self._all_items_by_key.clear()
+            self._items_by_path.clear()
             self._current_nodes = dict(state.nodes_by_key)
             if not state.nodes_by_key:
                 return
@@ -1135,6 +1271,9 @@ class BankViewerView(QWidget):
                         ):
                             continue
                         self._create_tree_item(None, rnode, None, {rkey})
+
+            if prev_scroll_val is not None and vbar is not None:
+                vbar.setValue(prev_scroll_val)
 
             self._update_tree_selection(
                 state.selected_node_key,

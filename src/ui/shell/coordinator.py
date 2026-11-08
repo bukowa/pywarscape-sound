@@ -531,16 +531,12 @@ class WorkspaceCoordinator:
 
         if outcome.applied > 0 and self.bank_viewer_store.project is not None:
             self.bank_viewer_store.load_project(self.bank_viewer_store.project)
-            for b_name in outcome.touched_banks:
-                entry = session.get_loaded_entry(b_name)
-                if entry is not None:
-                    bank, _, diff_res = entry
-                    self.bank_viewer_store.load_soundbank_instance(
-                        b_name, bank, diff_result=diff_res
-                    )
+            self.bank_viewer_store.refresh_touched_banks(
+                outcome.touched_banks, preferred_bank=sel_bank
+            )
 
             # Restore view-state selection continuity
-            if sel_bank and sel_bank in outcome.touched_banks:
+            if sel_bank and any(b.lower() == sel_bank.lower() for b in outcome.touched_banks):
                 if len(sel_keys) > 1:
                     self.bank_viewer_store.select_nodes(sel_keys, primary_key=sel_key)
                 elif sel_key:
@@ -579,15 +575,11 @@ class WorkspaceCoordinator:
 
         if outcome.applied > 0 and self.bank_viewer_store.project is not None:
             self.bank_viewer_store.load_project(self.bank_viewer_store.project)
-            for b_name in outcome.touched_banks:
-                entry = session.get_loaded_entry(b_name)
-                if entry is not None:
-                    bank, _, diff_res = entry
-                    self.bank_viewer_store.load_soundbank_instance(
-                        b_name, bank, diff_result=diff_res
-                    )
+            self.bank_viewer_store.refresh_touched_banks(
+                outcome.touched_banks, preferred_bank=sel_bank
+            )
 
-            if sel_bank and sel_bank in outcome.touched_banks:
+            if sel_bank and any(b.lower() == sel_bank.lower() for b in outcome.touched_banks):
                 if len(sel_keys) > 1:
                     self.bank_viewer_store.select_nodes(sel_keys, primary_key=sel_key)
                 elif sel_key:

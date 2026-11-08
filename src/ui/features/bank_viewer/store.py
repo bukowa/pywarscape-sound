@@ -513,13 +513,38 @@ class BankViewerStore:
         if outcome.applied > 0:
             if self._session.project is not None:
                 self.load_project(self._session.project)
-            for b_name in outcome.touched_banks:
-                entry = self._session.get_loaded_entry(b_name)
-                if entry is not None:
-                    bank, _, diff_res = entry
-                    self.load_soundbank_instance(b_name, bank, diff_result=diff_res)
+            self.refresh_touched_banks(outcome.touched_banks, preferred_bank=bank_name)
             return True
         return False
+
+    def refresh_touched_banks(
+        self,
+        touched_banks: Sequence[str],
+        preferred_bank: str | None = None,
+    ) -> str | None:
+        """Refreshes active viewer bank and invalidates cached sibling banks without switching bank focus."""
+        if not touched_banks:
+            return preferred_bank or self._state.selected_bank_name
+
+        active_bank = preferred_bank or self._state.selected_bank_name
+        target_bank: str | None = None
+        if active_bank:
+            for b_name in touched_banks:
+                if b_name.lower() == active_bank.lower():
+                    target_bank = active_bank
+                    break
+        if target_bank is None:
+            target_bank = touched_banks[0]
+
+        for b_name in touched_banks:
+            if b_name.lower() != target_bank.lower():
+                self._dispatch(BankCacheInvalidated(bank_name=b_name))
+
+        entry = self._session.get_loaded_entry(target_bank)
+        if entry is not None:
+            bank, _, diff_res = entry
+            self.load_soundbank_instance(target_bank, bank, diff_result=diff_res)
+        return target_bank
 
     def invalidate_caches(self) -> None:
         """Wipes all cached parsed bank trees and details."""
@@ -669,25 +694,21 @@ class BankViewerStore:
         if not self.can_undo_mutation or self.project is None:
             return False
 
+        prev_bank = self._state.selected_bank_name
         res = self._session.undo_mutation()
         if res is not None:
             touched_banks, node_key = res
             all_keys = self._session.last_undone_node_keys
             self.load_project(self.project)
-            for b_name in touched_banks:
-                entry = self._session.get_loaded_entry(b_name)
-                if entry is not None:
-                    bank, _, diff_res = entry
-                    self.load_soundbank_instance(b_name, bank, diff_result=diff_res)
-            if all_keys and touched_banks:
-                primary_bank = touched_banks[0]
-                if len(all_keys) > 1:
-                    self.select_nodes(all_keys, primary_key=all_keys[0])
+            primary_bank = self.refresh_touched_banks(touched_banks, preferred_bank=prev_bank)
+            valid_keys = tuple(k for k in all_keys if k in self._state.nodes_by_key) or all_keys
+            if valid_keys and primary_bank:
+                if len(valid_keys) > 1:
+                    self.select_nodes(valid_keys, primary_key=valid_keys[0])
                 else:
-                    self.select_node(all_keys[0])
-                self._resolve_node_details(primary_bank, all_keys[0])
-            elif node_key and touched_banks:
-                primary_bank = touched_banks[0]
+                    self.select_node(valid_keys[0])
+                self._resolve_node_details(primary_bank, valid_keys[0])
+            elif node_key and primary_bank:
                 self._resolve_node_details(primary_bank, node_key)
                 self.select_node(node_key)
             return True
@@ -698,25 +719,21 @@ class BankViewerStore:
         if not self.can_redo_mutation or self.project is None:
             return False
 
+        prev_bank = self._state.selected_bank_name
         res = self._session.redo_mutation()
         if res is not None:
             touched_banks, node_key = res
             all_keys = self._session.last_redone_node_keys
             self.load_project(self.project)
-            for b_name in touched_banks:
-                entry = self._session.get_loaded_entry(b_name)
-                if entry is not None:
-                    bank, _, diff_res = entry
-                    self.load_soundbank_instance(b_name, bank, diff_result=diff_res)
-            if all_keys and touched_banks:
-                primary_bank = touched_banks[-1]
-                if len(all_keys) > 1:
-                    self.select_nodes(all_keys, primary_key=all_keys[-1])
+            primary_bank = self.refresh_touched_banks(touched_banks, preferred_bank=prev_bank)
+            valid_keys = tuple(k for k in all_keys if k in self._state.nodes_by_key) or all_keys
+            if valid_keys and primary_bank:
+                if len(valid_keys) > 1:
+                    self.select_nodes(valid_keys, primary_key=valid_keys[-1])
                 else:
-                    self.select_node(all_keys[-1])
-                self._resolve_node_details(primary_bank, all_keys[-1])
-            elif node_key and touched_banks:
-                primary_bank = touched_banks[-1]
+                    self.select_node(valid_keys[-1])
+                self._resolve_node_details(primary_bank, valid_keys[-1])
+            elif node_key and primary_bank:
                 self._resolve_node_details(primary_bank, node_key)
                 self.select_node(node_key)
             return True
@@ -804,11 +821,7 @@ class BankViewerStore:
         outcome = self._session.apply_batch(batch)
         if outcome.applied > 0:
             self.load_project(self.project)
-            for b_name in outcome.touched_banks:
-                entry = self._session.get_loaded_entry(b_name)
-                if entry is not None:
-                    bank, _, diff_res = entry
-                    self.load_soundbank_instance(b_name, bank, diff_result=diff_res)
+            self.refresh_touched_banks(outcome.touched_banks, preferred_bank=bank_name)
             primary_key = node_keys[0]
             if len(node_keys) > 1:
                 self.select_nodes(tuple(node_keys), primary_key=primary_key)

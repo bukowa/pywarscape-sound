@@ -21,7 +21,8 @@ from PySide6.QtGui import QDropEvent
 from PySide6.QtWidgets import QApplication
 
 from src.bnk.bank import BkhdChunk, DataChunk, DidxChunk, DidxEntry, HircChunk, SoundBank
-from src.bnk.models import CAkSound
+from src.bnk.models import CAkAction, CAkEvent, CAkRanSeqCntr, CAkSound
+from src.engine.ontology import ReplacementScope
 from src.ui.shell.store import ShellStore
 from src.ui.shell.view import MainWindow
 from src.workspace.cache import GameCache
@@ -404,3 +405,163 @@ def test_e2e_audio_sources_multiselect_media_replace_and_undo(qapp, qtbot, tmp_p
     assert (proj.audio_dir / "60001.wem").is_file()
     assert (proj.audio_dir / "60002.wem").is_file()
     assert window.bank_viewer_store.state.selected_node_keys == ("media:60001", "media:60002")
+
+
+def test_e2e_apply_selected_preserves_tree_focus_on_shared_referenced_node(
+    qapp, qtbot, tmp_path: Path
+):
+    """
+    Reproduces and verifies the fix for tree focus jumping to the root/first reference
+    when clicking 'Apply to Selected' on a node that has shared HIRC and cross-bank references.
+    """
+    raw_wav = make_synthetic_wav(tmp_path / "vanilla.wav")
+    wav_bytes = raw_wav.read_bytes()
+
+    # Sound 100 is inside shared container 50, which is referenced by BOTH Event 10 and Event 11
+    ev1 = CAkEvent(id=10, actions=[20])
+    act1 = CAkAction.create_play(id=20, target_id=50)
+    ev2 = CAkEvent(id=11, actions=[21])
+    act2 = CAkAction.create_play(id=21, target_id=50)
+    cntr = CAkRanSeqCntr(id=50, children=[100])
+    snd = CAkSound(
+        id=100,
+        source_id=50001,
+        file_id=50001,
+        stream_type=0,
+        file_offset=0,
+        in_memory_media_size=len(wav_bytes),
+    )
+    bank = SoundBank(
+        header=BkhdChunk(bank_id=901, version=112),
+        didx=DidxChunk(entries=[DidxEntry(file_id=50001, offset=0, size=len(wav_bytes))]),
+        data=DataChunk(data=wav_bytes),
+        hirc=HircChunk(objects=[ev1, act1, ev2, act2, cntr, snd]),
+    )
+
+    companion_bank = SoundBank(
+        header=BkhdChunk(bank_id=902, version=112),
+        didx=DidxChunk(entries=[DidxEntry(file_id=50001, offset=0, size=len(wav_bytes))]),
+        data=DataChunk(data=wav_bytes),
+        hirc=HircChunk(
+            objects=[
+                CAkSound(
+                    id=200,
+                    source_id=50001,
+                    file_id=50001,
+                    stream_type=0,
+                    file_offset=0,
+                    in_memory_media_size=len(wav_bytes),
+                )
+            ]
+        ),
+    )
+
+    cache_dir = tmp_path / "cache" / "audio"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    (cache_dir / "event_data.dat").write_bytes(b"\x00" * 32)
+    (cache_dir / "shared_refs.bnk").write_bytes(bank.to_bytes())
+    (cache_dir / "companion_refs.bnk").write_bytes(companion_bank.to_bytes())
+    cache = GameCache(GameType.ATTILA, cache_dir=cache_dir)
+
+    proj_dir = tmp_path / "SharedRefsFocusMod"
+    proj = ProjectStorage.create_project(proj_dir, name="SharedRefsFocusMod", game=GameType.ATTILA)
+    proj.cache = cache
+
+    lib_dir = tmp_path / "sfx_library"
+    wav_replacement = make_synthetic_wav(lib_dir / "replacement.wav")
+
+    shell_store = ShellStore()
+    window = MainWindow(shell_store)
+    qtbot.addWidget(window)
+    window.coordinator.confirm_replacement_scope = lambda _target: (
+        True,
+        ReplacementScope.OVERWRITE,
+    )
+    shell_store.open_project(proj)
+
+    # Pre-load companion bank in session so cross-bank references exist, then select shared_refs.bnk
+    window.bank_viewer_store.session.resolve_and_parse_bank("companion_refs.bnk")
+    window.bank_viewer_store.select_bank("shared_refs.bnk")
+    window.audio_sources_store.add_library(lib_dir, "Test Lib")
+    window.audio_sources_store.select_files([wav_replacement])
+
+    bv_view = window.bank_viewer_view
+    tree = bv_view.tree_widget
+    hier_item = bv_view._items_by_key["group:hierarchy"]
+    assert hier_item.childCount() == 2
+
+    ev1_item = hier_item.child(0)
+    ev2_item = hier_item.child(1)
+    assert ev1_item.data(0, Qt.ItemDataRole.UserRole + 1) == "hirc:10"
+    assert ev2_item.data(0, Qt.ItemDataRole.UserRole + 1) == "hirc:11"
+
+    # Expand Event 10 -> Action 20 (first reference branch)
+    tree.expandItem(ev1_item)
+    act1_item = ev1_item.child(0)
+    tree.expandItem(act1_item)
+
+    # Expand Event 11 -> Action 21 -> RanSeqCntr 50 (second reference branch where user works)
+    tree.expandItem(ev2_item)
+    act2_item = ev2_item.child(0)
+    tree.expandItem(act2_item)
+    cntr2_item = act2_item.child(0)
+    tree.expandItem(cntr2_item)
+    snd2_item = cntr2_item.child(0)
+    assert snd2_item is not None
+    assert snd2_item.data(0, Qt.ItemDataRole.UserRole + 1) == "hirc:100"
+
+    # Select Sound 100 specifically under Event 11 -> Action 21 -> RanSeqCntr 50
+    tree.clearSelection()
+    tree.setCurrentItem(snd2_item)
+    snd2_item.setSelected(True)
+    bv_view._on_tree_selection_changed()
+
+    def _item_path(item):
+        parts = []
+        curr = item
+        while curr is not None:
+            parts.append(curr.data(0, Qt.ItemDataRole.UserRole + 1))
+            curr = curr.parent()
+        return tuple(reversed(parts))
+
+    expected_path = ("group:hierarchy", "hirc:11", "hirc:21", "hirc:50", "hirc:100")
+    assert _item_path(tree.currentItem()) == expected_path
+
+    # Click Apply to Selected
+    qtbot.mouseClick(window.audio_sources_view.btn_apply, Qt.MouseButton.LeftButton)
+
+    # Verify active bank did not jump to companion_refs.bnk and tree focus stayed on expected_path
+    assert window.bank_viewer_store.state.selected_bank_name == "shared_refs.bnk"
+    assert tree.currentItem() is not None
+    assert _item_path(tree.currentItem()) == expected_path
+
+    # Verify RanSeqCntr 50 under Event 10 -> Action 20 was NOT spuriously expanded
+    hier_after = bv_view._items_by_key["group:hierarchy"]
+    act1_after = hier_after.child(0).child(0)
+    cntr1_after = act1_after.child(0)
+    assert cntr1_after.isExpanded() is False
+
+    # Now also expand RanSeqCntr 50 under Event 10 -> Action 20 so BOTH references to Sound 100 are visible,
+    # re-select Sound 100 under Event 11 -> Action 21 -> RanSeqCntr 50, and apply again
+    tree.expandItem(cntr1_after)
+    snd2_after = hier_after.child(1).child(0).child(0).child(0)
+    tree.clearSelection()
+    tree.setCurrentItem(snd2_after)
+    snd2_after.setSelected(True)
+    bv_view._on_tree_selection_changed()
+    assert _item_path(tree.currentItem()) == expected_path
+
+    qtbot.mouseClick(window.audio_sources_view.btn_apply, Qt.MouseButton.LeftButton)
+    assert window.bank_viewer_store.state.selected_bank_name == "shared_refs.bnk"
+    assert tree.currentItem() is not None
+    assert _item_path(tree.currentItem()) == expected_path
+    assert len(bv_view._all_items_by_key.get("hirc:100", [])) == 2
+
+    # Undo and Redo must also preserve tree focus on the second reference branch
+    window.act_undo.trigger()
+    assert window.bank_viewer_store.state.selected_bank_name == "shared_refs.bnk"
+    assert _item_path(tree.currentItem()) == expected_path
+
+    window.act_redo.trigger()
+    assert window.bank_viewer_store.state.selected_bank_name == "shared_refs.bnk"
+    assert _item_path(tree.currentItem()) == expected_path

@@ -10,7 +10,7 @@ Provides full AST visualization, navigation history, property inspection, and di
 - `inspector_panel.py`: `InspectorPanel` coordinating navigation headers and stacked type-specific inspector views.
 - `overlays.py`: Interactive hierarchy tree overlay specifications and pure resolution helpers (`OverlaySpec`, `TreeOverlay`, `resolve_node_label`, `resolve_node_details`).
 - `state.py`: Immutable state models (`BankViewerState`, `HircTreeNode`, `NodeInspectorDetails`, `InspectorViewType`).
-- `store.py`: Headless `BankViewerStore` orchestrating bank AST caching, diff inspection, navigation history, batch node muting, per-slot revert, parameter tuning, and container variation appending (`mute_nodes`, `revert_node`, `update_node_params`, `append_container_variation`).
+- `store.py`: Headless `BankViewerStore` orchestrating bank AST caching, diff inspection, navigation history, batch node muting, per-slot revert, parameter tuning, and container variation appending (`mute_nodes`, `revert_node`, `update_node_params`, `append_container_variation`, `refresh_touched_banks`).
 - `view.py`: `BankViewerView` PySide6 widget containing resizable splitters, hierarchy trees, multi-selection routing, and context menus.
 - `views/container_view.py`: `ContainerInspectorView` inspecting Random/Sequence and Switch container routing.
 - `views/default_view.py`: `DefaultInspectorView` generic fallback inspector rendering raw HIRC properties.
