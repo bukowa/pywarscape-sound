@@ -147,18 +147,18 @@ PyWarscape Sound uses automated GitHub Actions workflows for continuous integrat
 2. **Commit all pending changes**:
    ```powershell
    git add .
-   git commit -m "chore: prepare v0.1.0 release"
+   git commit -m "chore: prepare v0.2.0 release"
    ```
 
 3. **Create and push an annotated git tag**:
    ```powershell
-   git tag -a v0.1.0 -m "Release v0.1.0"
-   git push origin v0.1.0
+   git tag -a v0.2.0 -m "Release v0.2.0"
+   git push origin v0.2.0
    ```
 
 4. **Verify GitHub Actions Build**:
    - The `Release` workflow automatically executes all test gates.
-   - It builds `dist/PyWarscapeSound-v0.1.0-windows-x64.zip` and generates `dist/SHA256SUMS.txt`.
+   - It builds `dist/PyWarscapeSound-v0.2.0-windows-x64.zip` and generates `dist/SHA256SUMS.txt`.
    - It creates a Draft Release on GitHub containing the zip and checksums.
 
 5. **Publish**:

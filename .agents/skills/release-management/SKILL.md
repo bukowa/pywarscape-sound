@@ -123,3 +123,4 @@ git push origin master
 git push origin v<X.Y.Z>
 ```
 Explain that pushing the `v<X.Y.Z>` tag triggers the `.github/workflows/release.yml` GitHub Actions pipeline, which builds `dist/PyWarscapeSound-v<X.Y.Z>-windows-x64.zip`, computes `SHA256SUMS.txt`, and creates the GitHub Release.
+

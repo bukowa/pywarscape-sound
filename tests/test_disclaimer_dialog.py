@@ -16,6 +16,7 @@ def test_changelog_file_exists():
     changelog = Path(__file__).resolve().parents[1] / "CHANGELOG.md"
     assert changelog.is_file(), "CHANGELOG.md must exist in repository root"
     content = changelog.read_text(encoding="utf-8")
+    assert "[0.2.0]" in content
     assert "[0.1.0]" in content
     assert "Multi-Game SoundBank" in content
 
@@ -45,6 +46,7 @@ def test_changelog_dialog_renders(qapp):
     dialog = ChangelogDialog()
     assert dialog.windowTitle() == "PyWarscape Sound - Changelog"
     text = dialog.browser.toPlainText()
+    assert "[0.2.0]" in text
     assert "[0.1.0]" in text
     dialog.close()
 

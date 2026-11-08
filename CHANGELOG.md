@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-11-08
+
+### Added
+- **Music Track Replacement**:
+  - Full support for interactive music track (`CAkMusicTrack`) audio replacement and sub-track manipulation in the mutation pipeline (`planner.py`, `effectuator.py`, `graph.py`, `session.py`).
+  - Added dedicated Music Track view panel (`views/music_view.py`) for inspecting music sub-tracks, durations, and clips.
+- **Engine Capability Matrix & Conformance Vectors**:
+  - Implemented capability matrix (`src/engine/capability_matrix.json`, `src/engine/capabilities.py`) validating node-level mutation constraints and feature gates.
+  - Added vector-driven conformance verification test suite (`tests/vectors/`) covering SoundBank mutation scenarios.
+- **SoundBank Navigation & Categorization**:
+  - Added bank list grouping and classification by game and category in `bank_list_panel.py`.
+- **UI Refinements**:
+  - Renamed sound library folder addition button to "Add Folder...".
+- **Agent Release Management**:
+  - Added comprehensive release-management agent skill documenting all release steps and canonical file updates.
+
+### Fixed
+- **SoundBank Hierarchy Refresh**:
+  - Fixed tree hierarchy synchronization when promoting embedded sounds to streamed `.wem` or overwriting existing `.wem` assets.
+
+### Documentation
+- Added AI-assisted development and vibecoded notice to README.
+
 ## [0.1.0] - 2026-11-06
 
 ### Added
