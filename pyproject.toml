@@ -1,6 +1,6 @@
 [project]
 name = "pywarscape-sound"
-version = "0.2.0"
+version = "0.3.0"
 description = "SoundBank (.bnk) and audio editor for Total War: Attila and Rome II"
 readme = "README.md"
 license = "MIT"

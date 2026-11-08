@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-11-08
+
+### Added
+- **Companion Logic SoundBank Mapping**:
+  - Automatic mapping for all 28 split Attila and Rome II data banks (`*_data.bnk`) to companion logic banks.
+- **Decision Trees & Switch Inspectors**:
+  - Multi-depth decision tree resolution and table inspectors for `CAkMusicSwitchCntr` and `CAkDialogueEvent`.
+  - Contextual switch condition display and hierarchy tree path labels.
+- **Audio Fine-Tuning & Pool Variations**:
+  - Sound node parameter tuning for volume (`PropID 0`) and pitch (`PropID 2`).
+  - Support for appending new random/sequence audio variations to sound pools.
+- **Modder Usability & Workflows**:
+  - Direct drag-and-drop replacement onto SoundBank hierarchy tree rows.
+  - Right-click context menus for sub-tracks, muting, and per-slot baseline revert.
+  - Blast radius impact dialog displaying affected events and switch contexts.
+  - End-to-end modder workflow integration test suite validating playable compiled packs.
+
+### Changed
+- Baseline SoundBank resolution queries active mod dependencies before falling back to game cache.
+
+### Fixed
+- True per-slot baseline revert for sound nodes and music tracks without affecting sibling edits.
+- Global WEM ID generator checks unopened project and cache banks to prevent collisions.
+
 ## [0.2.0] - 2026-11-08
 
 ### Added
