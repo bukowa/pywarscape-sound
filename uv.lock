@@ -504,7 +504,7 @@ wheels = [
 
 [[package]]
 name = "pywarscape-sound"
-version = "0.2.0"
+version = "0.3.1"
 source = { virtual = "." }
 default-groups = ["dev", "test"]
 dependencies = [

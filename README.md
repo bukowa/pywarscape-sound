@@ -114,14 +114,14 @@ uv run python scripts/test_live_game.py
 To package the standalone distribution executable locally:
 
 ```powershell
-uv run python scripts/build_dist.py --version 0.3.0
+uv run python scripts/build_dist.py --version 0.3.1
 ```
 
 The build script:
 1. Cleans intermediate build caches.
 2. Invokes PyInstaller using `audio_editor.spec` in onedir mode.
 3. Bundles verified `tools/vgmstream/` binaries.
-4. Generates a standalone ZIP archive at `dist/PyWarscapeSound-v0.3.0-windows-x64.zip`.
+4. Generates a standalone ZIP archive at `dist/PyWarscapeSound-v0.3.1-windows-x64.zip`.
 
 ---
 
@@ -147,13 +147,13 @@ PyWarscape Sound uses automated GitHub Actions workflows for continuous integrat
 2. **Commit all pending changes**:
    ```powershell
    git add .
-   git commit -m "chore: prepare v0.3.0 release"
+   git commit -m "chore: prepare v0.3.1 release"
    ```
 
 3. **Create and push an annotated git tag**:
    ```powershell
-   git tag -a v0.3.0 -m "Release v0.3.0"
-   git push origin v0.3.0
+   git tag -a v0.3.1 -m "Release v0.3.1"
+   git push origin v0.3.1
    ```
 
 4. **Verify GitHub Actions Build**:

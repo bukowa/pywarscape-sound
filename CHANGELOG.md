@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] - 2026-11-08
+
+### Added
+- **Pre-Flight Pack Export Integrity Validator**:
+  - Validates movie pack exports before writing to disk to prevent silent game crashes.
+  - Checks path isolation (`audio/` only), bit-exact SoundBank roundtrip, WEM RIFF/WAVE headers, non-empty data size, and DAG media closure.
+- **E2E Modder Core Jobs Suite**:
+  - Added comprehensive 11-job end-to-end modder verification matrix (`tests/test_e2e_modder_core_jobs.py`) covering all game sound replacement workflows.
+
+### Fixed
+- **SoundBank Byte Exactness on Undo**:
+  - Fixed `MutationRecord.is_media` classification so bank undo transactions correctly restore exact SoundBank binary bytes and AST structures.
+- **Loose Vorbis Streaming**:
+  - Tolerated untouched vanilla base game Vorbis streams when local audio cache is unpopulated, preventing false rejection of valid exports.
+- **WEM Header Parsing**:
+  - Protected Vorbis chunk header parsing against short or synthetic stream headers.
+
 ## [0.3.0] - 2026-11-08
 
 ### Added
