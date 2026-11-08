@@ -83,6 +83,8 @@ class AudioProjectPort(Protocol):
         self,
         output_path: Path | str | None = None,
         pack_type: int = 3,
+        *,
+        validate: bool = False,
     ) -> Path: ...
 
     def register_in_user_script(self, pack_name: str | None = None) -> Path | None: ...

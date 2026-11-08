@@ -68,6 +68,14 @@ class PackHealthReport:
         object.__setattr__(self, "all_fixable", all_fixable)
 
 
+class PackPreflightError(RuntimeError):
+    """Raised when mod pack pre-flight validation fails before compilation."""
+
+    def __init__(self, message: str, report: PackHealthReport) -> None:
+        super().__init__(message)
+        self.report = report
+
+
 def sanitize_stid_name(raw_name: str | bytes) -> str:
     """Extracts a valid clean SoundBank name, stripping null bytes and non-ASCII binary garbage."""
     if isinstance(raw_name, bytes):
@@ -279,6 +287,368 @@ class PackHealthScanner:
                     )
 
         return PackHealthReport(pack_name=pack_path.name, issues=issues)
+
+    @classmethod
+    def validate_project_preflight(cls, project: object) -> PackHealthReport:
+        """Validates all staged assets in project.audio_dir before pack compilation.
+
+        Verifies:
+        1. Only valid audio files exist in pack_root/audio/ (Movie/Mod pack isolation).
+        2. Every .bnk parses cleanly and round-trips bit-identically.
+        3. Every .wem has a valid RIFF/WAVE header and non-empty payload.
+        4. DAG media closure and stream/codec parity (stream_type == 2 and matching plugin_id).
+        5. CAkMusicSegment markers are sorted and duration-aligned.
+        """
+        from src.bnk.bank import SoundBank
+        from src.bnk.models import CAkMusicSegment, CAkMusicTrack, CAkSound
+        from src.bnk.wem import WemFormatTag, WemHeader, parse_wem_header
+
+        issues: list[HealthIssue] = []
+        audio_dir: Path | None = getattr(project, "audio_dir", None)
+        manifest = getattr(project, "manifest", None)
+        pack_name = getattr(manifest, "name", "mod_pack")
+
+        if not audio_dir or not audio_dir.is_dir():
+            return PackHealthReport(pack_name=pack_name, issues=())
+
+        staged_wems: dict[int, tuple[Path, WemHeader]] = {}
+        staged_banks: dict[str, tuple[Path, SoundBank, bytes]] = {}
+
+        # 1. Inspect all physical files in pack_root/audio/
+        for f in audio_dir.iterdir():
+            if not f.is_file() or f.name.endswith(".tmp"):
+                continue
+
+            lower_name = f.name.lower()
+            rel_file = f"audio/{f.name}"
+
+            if lower_name.endswith(".bnk"):
+                try:
+                    data = f.read_bytes()
+                    bank = SoundBank.from_bytes(data)
+                    rebuilt = bank.to_bytes()
+                    if rebuilt != data:
+                        issues.append(
+                            HealthIssue(
+                                issue_id="preflight_bank_roundtrip_mismatch",
+                                file_path=rel_file,
+                                object_id=None,
+                                title="Bank Bit-Exact Roundtrip Failure",
+                                description=f"SoundBank '{f.name}' fails bit-exact re-serialization.",
+                                severity=IssueSeverity.CRITICAL_CRASH,
+                                can_autofix=False,
+                            )
+                        )
+                    bank_issues = cls.scan_soundbank(rel_file, data)
+                    issues.extend(bank_issues)
+                    staged_banks[lower_name] = (f, bank, data)
+                except Exception as ex:
+                    issues.append(
+                        HealthIssue(
+                            issue_id="preflight_bank_parse_error",
+                            file_path=rel_file,
+                            object_id=None,
+                            title="SoundBank Parse Error",
+                            description=f"SoundBank '{f.name}' failed parsing: {ex}",
+                            severity=IssueSeverity.CRITICAL_CRASH,
+                            can_autofix=False,
+                        )
+                    )
+            elif lower_name.endswith(".wem"):
+                try:
+                    wem_id = int(f.stem)
+                except ValueError:
+                    wem_id = -1
+                    issues.append(
+                        HealthIssue(
+                            issue_id="preflight_wem_invalid_filename",
+                            file_path=rel_file,
+                            object_id=None,
+                            title="Invalid WEM Filename",
+                            description=f"WEM file '{f.name}' must have a numeric ID stem.",
+                            severity=IssueSeverity.CRITICAL_CRASH,
+                            can_autofix=False,
+                        )
+                    )
+                try:
+                    data = f.read_bytes()
+                    header = parse_wem_header(data)
+                    if (
+                        header.form_type != "WAVE"
+                        or header.channels not in (1, 2)
+                        or header.sample_rate <= 0
+                    ):
+                        issues.append(
+                            HealthIssue(
+                                issue_id="preflight_wem_invalid_header",
+                                file_path=rel_file,
+                                object_id=wem_id if wem_id != -1 else None,
+                                title="Invalid WEM Audio Header",
+                                description=(
+                                    f"WEM '{f.name}' has invalid audio format (channels={header.channels}, "
+                                    f"rate={header.sample_rate})."
+                                ),
+                                severity=IssueSeverity.CRITICAL_CRASH,
+                                can_autofix=False,
+                            )
+                        )
+                    elif header.data_size <= 0:
+                        issues.append(
+                            HealthIssue(
+                                issue_id="preflight_wem_empty_payload",
+                                file_path=rel_file,
+                                object_id=wem_id if wem_id != -1 else None,
+                                title="Empty WEM Audio Payload",
+                                description=f"WEM '{f.name}' contains zero audio data bytes.",
+                                severity=IssueSeverity.CRITICAL_CRASH,
+                                can_autofix=False,
+                            )
+                        )
+                    if wem_id != -1:
+                        staged_wems[wem_id] = (f, header)
+                except Exception as ex:
+                    issues.append(
+                        HealthIssue(
+                            issue_id="preflight_wem_corrupt",
+                            file_path=rel_file,
+                            object_id=wem_id if wem_id != -1 else None,
+                            title="Corrupt WEM File",
+                            description=f"Failed parsing WEM file '{f.name}': {ex}",
+                            severity=IssueSeverity.CRITICAL_CRASH,
+                            can_autofix=False,
+                        )
+                    )
+            elif lower_name == "event_data.dat" or lower_name.endswith(".dat"):
+                pass
+            else:
+                issues.append(
+                    HealthIssue(
+                        issue_id="preflight_invalid_file_in_audio",
+                        file_path=rel_file,
+                        object_id=None,
+                        title="Invalid File in Audio Pack",
+                        description=(
+                            f"Unexpected file '{f.name}' in audio directory. "
+                            f"Audio mod packs must only contain audio files."
+                        ),
+                        severity=IssueSeverity.CRITICAL_CRASH,
+                        can_autofix=False,
+                    )
+                )
+
+        resolver = getattr(project, "resolver", None)
+        cache = getattr(project, "cache", None)
+        has_populated_cache = bool(
+            cache is not None
+            and getattr(cache, "cache_dir", None)
+            and getattr(cache.cache_dir, "is_dir", lambda: False)()
+        )
+
+        # 2. DAG closure & stream/codec parity checks across staged banks
+        for _bank_lower, (b_path, bank, _) in staged_banks.items():
+            if not bank.hirc or not bank.hirc.objects:
+                continue
+
+            for obj in bank.hirc.objects:
+                if isinstance(obj, CAkSound):
+                    wid = obj.source_id
+                    if wid in staged_wems:
+                        _wem_path, wem_hdr = staged_wems[wid]
+                        if obj.stream_type != 2:
+                            issues.append(
+                                HealthIssue(
+                                    issue_id="preflight_sound_stream_type_mismatch",
+                                    file_path=f"audio/{b_path.name}",
+                                    object_id=obj.id,
+                                    title="Sound Node Stream Type Mismatch",
+                                    description=(
+                                        f"Sound {obj.id} in '{b_path.name}' has stream_type={obj.stream_type}, "
+                                        f"but references staged loose WEM {wid} which requires stream_type=2 (Streamed)."
+                                    ),
+                                    severity=IssueSeverity.CRITICAL_CRASH,
+                                    can_autofix=False,
+                                )
+                            )
+                        is_pcm = wem_hdr.format_tag in (0x0001, 0xFFFE, WemFormatTag.EXTENSIBLE)
+                        expected_plugin = 0x00010001 if is_pcm else 0x00040001
+                        if obj.plugin_id != expected_plugin:
+                            issues.append(
+                                HealthIssue(
+                                    issue_id="preflight_sound_plugin_id_mismatch",
+                                    file_path=f"audio/{b_path.name}",
+                                    object_id=obj.id,
+                                    title="Sound Plugin ID Codec Mismatch",
+                                    description=(
+                                        f"Sound {obj.id} plugin_id is 0x{obj.plugin_id:08x}, "
+                                        f"expected 0x{expected_plugin:08x} for {'PCM' if is_pcm else 'Vorbis'} WEM {wid}."
+                                    ),
+                                    severity=IssueSeverity.CRITICAL_CRASH,
+                                    can_autofix=False,
+                                )
+                            )
+                    elif obj.plugin_id == 0x00010001:
+                        in_bank_didx = bank.didx and any(
+                            e.file_id == wid for e in bank.didx.entries
+                        )
+                        resolvable = in_bank_didx or (
+                            resolver is not None and resolver.resolve_wem_path(wid) is not None
+                        )
+                        if not resolvable:
+                            issues.append(
+                                HealthIssue(
+                                    issue_id="preflight_sound_missing_media",
+                                    file_path=f"audio/{b_path.name}",
+                                    object_id=obj.id,
+                                    title="Missing Loose Media File",
+                                    description=(
+                                        f"Sound {obj.id} in '{b_path.name}' expects staged PCM WEM {wid}, "
+                                        f"but {wid}.wem was neither staged nor found in dependencies."
+                                    ),
+                                    severity=IssueSeverity.CRITICAL_CRASH,
+                                    can_autofix=False,
+                                )
+                            )
+                    elif obj.stream_type == 2:
+                        in_bank_didx = bank.didx and any(
+                            e.file_id == wid for e in bank.didx.entries
+                        )
+                        resolvable = in_bank_didx or (
+                            resolver is not None and resolver.resolve_wem_path(wid) is not None
+                        )
+                        if not resolvable and has_populated_cache:
+                            issues.append(
+                                HealthIssue(
+                                    issue_id="preflight_sound_unresolved_media",
+                                    file_path=f"audio/{b_path.name}",
+                                    object_id=obj.id,
+                                    title="Unresolved Base Game Media Reference",
+                                    description=(
+                                        f"Sound {obj.id} in '{b_path.name}' references streamed WEM {wid}, "
+                                        f"which was not found in local cache."
+                                    ),
+                                    severity=IssueSeverity.WARNING,
+                                    can_autofix=False,
+                                )
+                            )
+
+                elif isinstance(obj, CAkMusicTrack):
+                    for idx, src in enumerate(obj.sources):
+                        wid = src.source_id
+                        if wid in staged_wems:
+                            _wem_path, wem_hdr = staged_wems[wid]
+                            if src.stream_type != 2:
+                                issues.append(
+                                    HealthIssue(
+                                        issue_id="preflight_track_stream_type_mismatch",
+                                        file_path=f"audio/{b_path.name}",
+                                        object_id=obj.id,
+                                        title="Music Track Source Stream Type Mismatch",
+                                        description=(
+                                            f"MusicTrack {obj.id} source[{idx}] has stream_type={src.stream_type}, "
+                                            f"expected 2 for staged loose WEM {wid}."
+                                        ),
+                                        severity=IssueSeverity.CRITICAL_CRASH,
+                                        can_autofix=False,
+                                    )
+                                )
+                            is_pcm = wem_hdr.format_tag in (0x0001, 0xFFFE, WemFormatTag.EXTENSIBLE)
+                            expected_plugin = 0x00010001 if is_pcm else 0x00040001
+                            if src.plugin_id != expected_plugin:
+                                issues.append(
+                                    HealthIssue(
+                                        issue_id="preflight_track_plugin_id_mismatch",
+                                        file_path=f"audio/{b_path.name}",
+                                        object_id=obj.id,
+                                        title="Music Track Source Plugin ID Mismatch",
+                                        description=(
+                                            f"MusicTrack {obj.id} source[{idx}] plugin_id is 0x{src.plugin_id:08x}, "
+                                            f"expected 0x{expected_plugin:08x} for {'PCM' if is_pcm else 'Vorbis'} WEM {wid}."
+                                        ),
+                                        severity=IssueSeverity.CRITICAL_CRASH,
+                                        can_autofix=False,
+                                    )
+                                )
+                        elif src.plugin_id == 0x00010001:
+                            in_bank_didx = bank.didx and any(
+                                e.file_id == wid for e in bank.didx.entries
+                            )
+                            resolvable = in_bank_didx or (
+                                resolver is not None and resolver.resolve_wem_path(wid) is not None
+                            )
+                            if not resolvable:
+                                issues.append(
+                                    HealthIssue(
+                                        issue_id="preflight_track_missing_media",
+                                        file_path=f"audio/{b_path.name}",
+                                        object_id=obj.id,
+                                        title="Missing Music Track Loose Media File",
+                                        description=(
+                                            f"MusicTrack {obj.id} source[{idx}] expects staged PCM WEM {wid}, "
+                                            f"but {wid}.wem was neither staged nor found in dependencies."
+                                        ),
+                                        severity=IssueSeverity.CRITICAL_CRASH,
+                                        can_autofix=False,
+                                    )
+                                )
+                        elif src.stream_type == 2:
+                            in_bank_didx = bank.didx and any(
+                                e.file_id == wid for e in bank.didx.entries
+                            )
+                            resolvable = in_bank_didx or (
+                                resolver is not None and resolver.resolve_wem_path(wid) is not None
+                            )
+                            if not resolvable and has_populated_cache:
+                                issues.append(
+                                    HealthIssue(
+                                        issue_id="preflight_track_unresolved_media",
+                                        file_path=f"audio/{b_path.name}",
+                                        object_id=obj.id,
+                                        title="Unresolved Music Track Base Game Media",
+                                        description=(
+                                            f"MusicTrack {obj.id} source[{idx}] references streamed WEM {wid}, "
+                                            f"which was not found in local cache."
+                                        ),
+                                        severity=IssueSeverity.WARNING,
+                                        can_autofix=False,
+                                    )
+                                )
+
+                elif isinstance(obj, CAkMusicSegment):
+                    if obj.markers:
+                        for i in range(len(obj.markers) - 1):
+                            if obj.markers[i].position > obj.markers[i + 1].position:
+                                issues.append(
+                                    HealthIssue(
+                                        issue_id="preflight_segment_markers_unsorted",
+                                        file_path=f"audio/{b_path.name}",
+                                        object_id=obj.id,
+                                        title="Unsorted Music Segment Markers",
+                                        description=(
+                                            f"MusicSegment {obj.id} markers are not sorted: "
+                                            f"marker {i} ({obj.markers[i].position}) > marker {i + 1} ({obj.markers[i + 1].position})."
+                                        ),
+                                        severity=IssueSeverity.CRITICAL_CRASH,
+                                        can_autofix=False,
+                                    )
+                                )
+                                break
+                        if abs(obj.markers[-1].position - obj.duration) > 0.5:
+                            issues.append(
+                                HealthIssue(
+                                    issue_id="preflight_segment_duration_mismatch",
+                                    file_path=f"audio/{b_path.name}",
+                                    object_id=obj.id,
+                                    title="Music Segment Exit Marker Duration Mismatch",
+                                    description=(
+                                        f"MusicSegment {obj.id} exit marker position {obj.markers[-1].position} "
+                                        f"does not match duration {obj.duration}."
+                                    ),
+                                    severity=IssueSeverity.WARNING,
+                                    can_autofix=False,
+                                )
+                            )
+
+        return PackHealthReport(pack_name=pack_name, issues=tuple(issues))
 
 
 class RepairStrategyRegistry:

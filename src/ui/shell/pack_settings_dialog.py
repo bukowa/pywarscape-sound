@@ -267,8 +267,16 @@ class PackSettingsDialog(QDialog):
         if chosen:
             self.project.set_output_pack_path(chosen)
         self._save_copy_to_game_setting(self.chk_copy_to_game.isChecked())
-        out_path = self.project.compile_mod_pack()
-        if self.chk_copy_to_game.isChecked():
-            self.project.copy_pack_to_game_data(out_path)
-        self.pack_built.emit(out_path)
-        self.accept()
+        try:
+            out_path = self.project.compile_mod_pack(validate=True)
+            if self.chk_copy_to_game.isChecked():
+                self.project.copy_pack_to_game_data(out_path)
+            self.pack_built.emit(out_path)
+            self.accept()
+        except Exception as ex:
+            from src.ui.theme import COLOR_WARNING
+
+            self.lbl_status.setText(f"Export blocked: {ex}")
+            self.lbl_status.setStyleSheet(
+                f"color: {COLOR_WARNING}; font-size: 11px; font-weight: bold;"
+            )

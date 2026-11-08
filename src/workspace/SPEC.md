@@ -5,7 +5,7 @@ Coordinates multi-game caches, dependency pack overlays, and sound library scann
 - `dependencies.py`: `DependencyManager` handling external `.pack` ingestion, table extraction, and priority conflicts.
 - `game.py`: Game definitions (`GameType`, `GameConfig`, `get_game_config`, `resolve_user_script_path`) for Attila and Rome II.
 - `game_detector.py`: Pure-Python `GameDetector` locating Steam library folders and game installation directories.
-- `health.py`: Diagnostic `PackHealthScanner` detecting and auto-repairing binary corruptions in SoundBanks.
+- `health.py`: Diagnostic `PackHealthScanner` detecting and auto-repairing binary corruptions in SoundBanks and validating staged assets prior to pack compilation (`PackPreflightError`, `validate_project_preflight`).
 - `importer.py`: Dedicated `PartImporter` service for copying SoundBanks, loose WEMs, and DB tables from external `.pack` files into `pack_root/audio/`.
 - `manifest.py`: Portable `ProjectManifest` schema (1.0), `DependencyPackInfo`, and `SoundLibraryRef`.
 - `paths.py`: Portable application root and configuration path resolution (`get_app_root`, `get_settings_path`, `get_recent_projects_path`, `get_log_file_path`, `get_cache_dir`).

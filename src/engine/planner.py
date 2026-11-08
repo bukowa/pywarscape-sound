@@ -479,18 +479,64 @@ def _try_plan_sound_node_replacement(
             )
 
         case ExistingMediaReferenceSource():
-            effects = (
-                UpdateSoundNodeIntent(
-                    bank_name=target.bank_name,
-                    sound_id=target.sound_id,
-                    new_stream_type=2,
-                    new_source_id=source.wem_id,
-                    new_file_id=source.wem_id,
-                    new_plugin_id=0x00010001,
-                ),
-                MarkBankModifiedIntent(bank_name=target.bank_name),
-            )
-            desc = f"Retarget Sound {target.sound_id} to existing media {source.wem_id}"
+            if scope == ReplacementScope.ISOLATE:
+                if forked_wem_id is not None:
+                    final_wem_id = forked_wem_id
+                else:
+                    existing_ids = collect_bank_wem_ids(bank)
+                    if existing_wems is not None:
+                        existing_ids = existing_ids | set(existing_wems)
+                    if reserved_wem_ids is not None:
+                        existing_ids = existing_ids | set(reserved_wem_ids)
+                    seed = _resolve_target_wem_id(sound)
+                    final_wem_id = allocate_unique_wem_id(existing_ids, preferred_seed=seed)
+
+                effects = (
+                    CopyMediaBytesIntent(
+                        source_wem_id=source.wem_id,
+                        target_wem_id=final_wem_id,
+                        source_bank_name=source.source_bank,
+                    ),
+                    UpdateSoundNodeIntent(
+                        bank_name=target.bank_name,
+                        sound_id=target.sound_id,
+                        new_stream_type=2,
+                        new_source_id=final_wem_id,
+                        new_file_id=final_wem_id,
+                        new_plugin_id=0x00010001,
+                    ),
+                    MarkBankModifiedIntent(bank_name=target.bank_name),
+                )
+                desc = (
+                    f"Isolate and retarget Sound {target.sound_id} to existing media "
+                    f"{source.wem_id} (forked WEM {final_wem_id})"
+                )
+            else:
+                final_wem_id = source.wem_id
+                effects_list: list[AudioMutationEffectIntent] = []
+                if source.source_bank is not None:
+                    effects_list.append(
+                        CopyMediaBytesIntent(
+                            source_wem_id=source.wem_id,
+                            target_wem_id=final_wem_id,
+                            source_bank_name=source.source_bank,
+                        )
+                    )
+                effects_list.extend(
+                    [
+                        UpdateSoundNodeIntent(
+                            bank_name=target.bank_name,
+                            sound_id=target.sound_id,
+                            new_stream_type=2,
+                            new_source_id=final_wem_id,
+                            new_file_id=final_wem_id,
+                        ),
+                        MarkBankModifiedIntent(bank_name=target.bank_name),
+                    ]
+                )
+                effects = tuple(effects_list)
+                desc = f"Retarget Sound {target.sound_id} to existing media {source.wem_id}"
+
             return AudioMutationPlan(
                 description=desc,
                 target=target,
@@ -506,7 +552,6 @@ def _try_plan_sound_node_replacement(
                     new_stream_type=2,
                     new_source_id=source.stub_wem_id,
                     new_file_id=source.stub_wem_id,
-                    new_plugin_id=0x00010001,
                 ),
                 MarkBankModifiedIntent(bank_name=target.bank_name),
             )
@@ -779,7 +824,11 @@ def _try_plan_music_track_replacement(
                         existing_ids, preferred_seed=target_wem_id
                     )
                 effects_tuple = (
-                    CopyMediaBytesIntent(source_wem_id=source.wem_id, target_wem_id=final_wem_id),
+                    CopyMediaBytesIntent(
+                        source_wem_id=source.wem_id,
+                        target_wem_id=final_wem_id,
+                        source_bank_name=source.source_bank,
+                    ),
                     UpdateMusicTrackNodeIntent(
                         bank_name=target.bank_name,
                         track_id=track.id,
@@ -800,25 +849,36 @@ def _try_plan_music_track_replacement(
                 )
             else:
                 final_wem_id = source.wem_id
-                effects_tuple = (
-                    UpdateMusicTrackNodeIntent(
-                        bank_name=target.bank_name,
-                        track_id=track.id,
-                        source_index=target.source_index,
-                        new_stream_type=2,
-                        new_source_id=final_wem_id,
-                        new_file_id=final_wem_id,
-                        new_plugin_id=0x00010001,
-                    ),
-                    SyncMusicTimelineIntent(
-                        bank_name=target.bank_name,
-                        track_id=track.id,
-                        new_duration_ms=0.0,
-                        source_index=target.source_index,
-                        parent_segment_id=parent_seg_id,
-                    ),
-                    MarkBankModifiedIntent(bank_name=target.bank_name),
+                effects_list: list[AudioMutationEffectIntent] = []
+                if source.source_bank is not None:
+                    effects_list.append(
+                        CopyMediaBytesIntent(
+                            source_wem_id=source.wem_id,
+                            target_wem_id=final_wem_id,
+                            source_bank_name=source.source_bank,
+                        )
+                    )
+                effects_list.extend(
+                    [
+                        UpdateMusicTrackNodeIntent(
+                            bank_name=target.bank_name,
+                            track_id=track.id,
+                            source_index=target.source_index,
+                            new_stream_type=2,
+                            new_source_id=final_wem_id,
+                            new_file_id=final_wem_id,
+                        ),
+                        SyncMusicTimelineIntent(
+                            bank_name=target.bank_name,
+                            track_id=track.id,
+                            new_duration_ms=0.0,
+                            source_index=target.source_index,
+                            parent_segment_id=parent_seg_id,
+                        ),
+                        MarkBankModifiedIntent(bank_name=target.bank_name),
+                    ]
                 )
+                effects_tuple = tuple(effects_list)
             desc = f"Retarget MusicTrack {target.track_id} source {target.source_index} to existing media {source.wem_id}"
             return AudioMutationPlan(
                 description=desc,

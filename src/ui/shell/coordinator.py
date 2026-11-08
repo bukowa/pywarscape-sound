@@ -836,6 +836,8 @@ class WorkspaceCoordinator:
         self,
         output_path: Path | str | None = None,
         pack_type: int = 3,
+        *,
+        validate: bool = False,
     ) -> Path:
         """Compiles the active project into a PFH4 Mod pack (default PT_MOD = 3)."""
         if self._active_project is None:
@@ -843,12 +845,17 @@ class WorkspaceCoordinator:
         return self._active_project.compile_mod_pack(
             output_path=output_path,
             pack_type=pack_type,
+            validate=validate,
         )
 
     def compile_movie_pack(
         self,
         output_path: Path | str | None = None,
         pack_type: int = 3,
+        *,
+        validate: bool = False,
     ) -> Path:
         """Alias for compile_mod_pack (defaults to PT_MOD = 3)."""
-        return self.compile_mod_pack(output_path=output_path, pack_type=pack_type)
+        return self.compile_mod_pack(
+            output_path=output_path, pack_type=pack_type, validate=validate
+        )

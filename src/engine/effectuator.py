@@ -178,8 +178,44 @@ def execute_mutation_plan(
                         raw_bytes = resolver.resolve_wem_bytes(intent.source_wem_id)
                     if raw_bytes is None and hasattr(bank, "get_media_data"):
                         raw_bytes = bank.get_media_data(intent.source_wem_id)
+                    if (
+                        raw_bytes is None
+                        and intent.source_bank_name
+                        and resolver is not None
+                        and hasattr(resolver, "resolve_bank_bytes")
+                    ):
+                        src_bnk_bytes = resolver.resolve_bank_bytes(intent.source_bank_name)
+                        if src_bnk_bytes is not None:
+                            try:
+                                from src.bnk.bank import SoundBank
+
+                                src_bank = SoundBank.from_bytes(src_bnk_bytes)
+                                raw_bytes = src_bank.get_media_data(intent.source_wem_id)
+                            except Exception:
+                                logger.debug(
+                                    "Failed to parse source bank %s for WEM %s",
+                                    intent.source_bank_name,
+                                    intent.source_wem_id,
+                                    exc_info=True,
+                                )
+                    if raw_bytes is None and hasattr(project, "audio_dir"):
+                        staged_file = project.audio_dir / f"{intent.source_wem_id}.wem"
+                        if staged_file.is_file():
+                            raw_bytes = staged_file.read_bytes()
+
                     if raw_bytes is not None:
-                        project.stage_wem(wem_id=intent.target_wem_id, data=raw_bytes)
+                        target_file = project.audio_dir / f"{intent.target_wem_id}.wem"
+                        if (
+                            intent.target_wem_id != intent.source_wem_id
+                            or not target_file.is_file()
+                        ):
+                            project.stage_wem(wem_id=intent.target_wem_id, data=raw_bytes)
+                        elif hasattr(project, "manifest") and hasattr(
+                            project.manifest, "staged_wems"
+                        ):
+                            if intent.target_wem_id not in project.manifest.staged_wems:
+                                project.manifest.staged_wems.append(intent.target_wem_id)
+
                         dur = 0.0
                         pl_id = 0x00010001
                         try:
@@ -205,9 +241,15 @@ def execute_mutation_plan(
                         staged_durations_ms[intent.target_wem_id] = dur
                         staged_plugin_ids[intent.target_wem_id] = pl_id
                     else:
-                        errors.append(
-                            f"Could not resolve source media bytes for WEM {intent.source_wem_id}"
-                        )
+                        if intent.target_wem_id != intent.source_wem_id:
+                            errors.append(
+                                f"Could not resolve source media bytes for WEM {intent.source_wem_id}"
+                            )
+                        else:
+                            logger.debug(
+                                "Retargeted to existing media %s without staging local bytes",
+                                intent.target_wem_id,
+                            )
 
                 case MarkBankModifiedIntent():
                     clean = (

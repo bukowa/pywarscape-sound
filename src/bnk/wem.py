@@ -227,8 +227,11 @@ def parse_wem_header(data: bytes) -> WemHeader:
                 samples_per_block = fmt_reader.read_u16()
                 channel_mask = fmt_reader.read_u32()
 
-            if format_tag == WemFormatTag.VORBIS:
-                vorbis_info = WemVorbisInfo.from_fmt_payload(chunk_data)
+            if format_tag == WemFormatTag.VORBIS and len(chunk_data) >= 66:
+                try:
+                    vorbis_info = WemVorbisInfo.from_fmt_payload(chunk_data)
+                except (ValueError, IndexError):
+                    pass
 
         elif chunk_id == "data":
             data_seen = True

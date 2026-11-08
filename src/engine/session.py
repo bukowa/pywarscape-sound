@@ -264,19 +264,27 @@ class WorkspaceSession:
         self,
         output_path: Path | str | None = None,
         pack_type: int = 3,
+        *,
+        validate: bool = False,
     ) -> Path:
         """Compiles the active project workspace into a Total War PFH4 Mod pack (default PT_MOD = 3)."""
         if self._project is None:
             raise RuntimeError("Cannot compile mod pack without an active project.")
-        return self._project.compile_mod_pack(output_path=output_path, pack_type=pack_type)
+        return self._project.compile_mod_pack(
+            output_path=output_path, pack_type=pack_type, validate=validate
+        )
 
     def compile_movie_pack(
         self,
         output_path: Path | str | None = None,
         pack_type: int = 3,
+        *,
+        validate: bool = False,
     ) -> Path:
         """Alias for compile_mod_pack (defaults to PT_MOD = 3)."""
-        return self.compile_mod_pack(output_path=output_path, pack_type=pack_type)
+        return self.compile_mod_pack(
+            output_path=output_path, pack_type=pack_type, validate=validate
+        )
 
     def register_in_user_script(self, pack_name: str | None = None) -> Path | None:
         """Registers the mod pack in user.script.txt for game startup."""
@@ -1137,7 +1145,10 @@ class WorkspaceSession:
                 for wid in target_wems:
                     cross_refs = self.get_cross_bank_wem_references(wid)
                     for ref in cross_refs:
-                        if ref.bank_name.lower() != item.target.bank_name.lower():
+                        if (
+                            isinstance(item.target, MediaNodeTarget)
+                            or ref.bank_name.lower() != item.target.bank_name.lower()
+                        ):
                             already_targeted = any(
                                 p.target.bank_name.lower() == ref.bank_name.lower()
                                 and (
@@ -1155,6 +1166,19 @@ class WorkspaceSession:
                             )
                             if not already_targeted:
                                 loaded_entry = self.get_loaded_entry(ref.bank_name)
+                                if loaded_entry is None:
+                                    try:
+                                        self.resolve_and_parse_bank(ref.bank_name)
+                                        loaded_entry = self.get_loaded_entry(ref.bank_name)
+                                    except (
+                                        FileNotFoundError,
+                                        ValueError,
+                                        KeyError,
+                                        IndexError,
+                                        RuntimeError,
+                                        OSError,
+                                    ):
+                                        loaded_entry = None
                                 if loaded_entry is not None:
                                     ref_bank = loaded_entry[0]
                                     track_obj = find_music_track_in_bank(ref_bank, ref.node_id)

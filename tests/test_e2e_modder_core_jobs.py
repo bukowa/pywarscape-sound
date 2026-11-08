@@ -31,25 +31,31 @@ from src.bnk.models import (
     AkMusicTransNodeParams,
     AkPlaylistItem,
     AkTrackSrcInfo,
+    CAkAction,
+    CAkEvent,
     CAkMusicRanSeqCntr,
     CAkMusicSegment,
     CAkMusicSwitchCntr,
     CAkMusicTrack,
     CAkRanSeqCntr,
     CAkSound,
+    CAkSwitchCntr,
     DecisionTreeNode,
     NodeBaseParams,
 )
-from src.bnk.wem import WemFormatTag, WemHeader, parse_wem_header
+from src.bnk.wem import WemFormatTag, WemHeader, build_silent_pcm_wem_bytes, parse_wem_header
 from src.compiler.pfh4_pack import extract_pfh4_file, read_pfh4_index
 from src.engine.ontology import (
     ExternalFileSource,
     ReplacementScope,
 )
+from src.models import AudioCatalogEntry
+from src.ui.features.audio_sources.state import AudioSourcesTab
 from src.ui.shell.store import ShellStore
 from src.ui.shell.view import MainWindow
 from src.workspace.cache import GameCache
 from src.workspace.game import GameType
+from src.workspace.health import PackPreflightError
 from src.workspace.storage import ProjectStorage
 from tests.support.factories import make_synthetic_wav
 
@@ -66,11 +72,13 @@ def assert_pack_engine_playable(pack_path: Path) -> None:
     1. The pack file exists and contains valid entries.
     2. Every .bnk inside the pack parses cleanly via SoundBank.from_bytes(b) and
        round-trips bit-identically (bank.to_bytes() == b).
-    3. Every .wem inside the pack has a valid RIFF/WAVE header (parse_wem_header).
+    3. Every .wem inside the pack has a valid RIFF/WAVE header (parse_wem_header),
+       channels in (1, 2), sample_rate > 0, and data_size > 0.
     4. Every CAkSound and CAkMusicTrack source in any packed .bnk whose source_id
        is a packed .wem has:
        - stream_type == 2 (Streamed),
-       - plugin_id == 0x00010001 (PCM) when the .wem header format_tag == 0xFFFE.
+       - plugin_id == 0x00010001 (PCM) when .wem header format_tag in (0x0001, 0xFFFE, WemFormatTag.EXTENSIBLE),
+       - plugin_id == 0x00040001 (Vorbis) when .wem header format_tag in (0xFFFF, WemFormatTag.VORBIS).
     5. For CAkMusicSegment, markers are in non-decreasing ascending order
        (markers[i].position <= markers[i+1].position) and if markers exist,
        markers[-1].position == pytest.approx(segment.duration).
@@ -97,6 +105,13 @@ def assert_pack_engine_playable(pack_path: Path) -> None:
             assert header.form_type == "WAVE", (
                 f"WEM {rel_path} form_type is {header.form_type}, expected WAVE"
             )
+            assert header.channels in (1, 2), (
+                f"WEM {rel_path} channels {header.channels} not 1 or 2"
+            )
+            assert header.sample_rate > 0, (
+                f"WEM {rel_path} invalid sample rate {header.sample_rate}"
+            )
+            assert header.data_size > 0, f"WEM {rel_path} empty data payload {header.data_size}"
             if wem_id != -1:
                 packed_wems[wem_id] = header
 
@@ -110,9 +125,13 @@ def assert_pack_engine_playable(pack_path: Path) -> None:
                     assert obj.stream_type == 2, (
                         f"Bank {bank_path} sound {obj.id} stream_type is {obj.stream_type}, expected 2 (Streamed)"
                     )
-                    if wem_hdr.format_tag in (0xFFFE, WemFormatTag.EXTENSIBLE):
+                    if wem_hdr.format_tag in (0x0001, 0xFFFE, WemFormatTag.EXTENSIBLE):
                         assert obj.plugin_id == 0x00010001, (
                             f"Bank {bank_path} sound {obj.id} plugin_id is 0x{obj.plugin_id:08x}, expected 0x00010001"
+                        )
+                    elif wem_hdr.format_tag in (0xFFFF, WemFormatTag.VORBIS):
+                        assert obj.plugin_id == 0x00040001, (
+                            f"Bank {bank_path} sound {obj.id} plugin_id is 0x{obj.plugin_id:08x}, expected 0x00040001"
                         )
             elif isinstance(obj, CAkMusicTrack):
                 for idx, src in enumerate(obj.sources):
@@ -121,9 +140,13 @@ def assert_pack_engine_playable(pack_path: Path) -> None:
                         assert src.stream_type == 2, (
                             f"Bank {bank_path} track {obj.id} source[{idx}] stream_type is {src.stream_type}, expected 2 (Streamed)"
                         )
-                        if wem_hdr.format_tag in (0xFFFE, WemFormatTag.EXTENSIBLE):
+                        if wem_hdr.format_tag in (0x0001, 0xFFFE, WemFormatTag.EXTENSIBLE):
                             assert src.plugin_id == 0x00010001, (
                                 f"Bank {bank_path} track {obj.id} source[{idx}] plugin_id is 0x{src.plugin_id:08x}, expected 0x00010001"
+                            )
+                        elif wem_hdr.format_tag in (0xFFFF, WemFormatTag.VORBIS):
+                            assert src.plugin_id == 0x00040001, (
+                                f"Bank {bank_path} track {obj.id} source[{idx}] plugin_id is 0x{src.plugin_id:08x}, expected 0x00040001"
                             )
             elif isinstance(obj, CAkMusicSegment):
                 if obj.markers:
@@ -730,3 +753,386 @@ def test_job6_slot_local_tuning_and_appending_pool_variation(qtbot, tmp_path: Pa
     output_pack = Path(project.manifest.output_pack_path)
     assert output_pack.is_file()
     assert_pack_engine_playable(output_pack)
+
+
+# =============================================================================
+# Job 7: Event & Switch Container Branch Replacement & Pack Export
+# =============================================================================
+
+
+def test_job7_event_and_switch_cntr_branch_replacement_and_pack_export(
+    qtbot, tmp_path: Path, monkeypatch
+):
+    """Job 7: Replace Sound 7010 under CAkSwitchCntr without altering Sound 7020 or switch structure."""
+    monkeypatch.setenv("APPDATA", str(tmp_path / "FakeAppData7"))
+
+    sound_branch1 = CAkSound(
+        id=7010,
+        source_id=70010,
+        file_id=70010,
+        stream_type=2,
+        plugin_id=0x00010001,
+    )
+    sound_branch2 = CAkSound(
+        id=7020,
+        source_id=70020,
+        file_id=70020,
+        stream_type=2,
+        plugin_id=0x00010001,
+    )
+    sw_cntr = CAkSwitchCntr(
+        id=7002,
+        group_id=1,
+        default_switch=1,
+        children=[7010, 7020],
+        switch_map={1: [7010], 2: [7020]},
+    )
+    action = CAkAction.create_play(id=7001, target_id=7002)
+    event = CAkEvent(id=7000, actions=[7001])
+    bank = SoundBank(
+        header=BkhdChunk(bank_id=70, version=112),
+        hirc=HircChunk(objects=[event, action, sw_cntr, sound_branch1, sound_branch2]),
+    )
+    vanilla_bytes = bank.to_bytes()
+
+    window, project, cache_dir = _setup_e2e_project(
+        tmp_path, "Job7Mod", {"battle_switches.bnk": bank}
+    )
+    (cache_dir / "70020.wem").write_bytes(
+        build_silent_pcm_wem_bytes(duration_ms=100, sample_rate=32000)
+    )
+    qtbot.addWidget(window)
+
+    bv_store = window.bank_viewer_store
+    bv_view = window.bank_viewer_view
+    bv_store.select_bank("battle_switches.bnk")
+    bv_store.select_node("hirc:7010")
+
+    item7010 = bv_view._items_by_key.get("hirc:7010")
+    assert item7010 is not None
+    bv_view.tree_widget.setCurrentItem(item7010)
+    item7010.setSelected(True)
+    bv_view._on_tree_selection_changed()
+
+    new_branch_wav = make_synthetic_wav(tmp_path / "branch1.wav", duration_s=0.4)
+    window.audio_sources_store.select_files([str(new_branch_wav)])
+    qtbot.mouseClick(window.audio_sources_view.btn_apply, Qt.MouseButton.LeftButton)
+
+    # Verify branch 1 updated, branch 2 untouched
+    entry = bv_store.session.get_loaded_entry("battle_switches.bnk")
+    assert entry is not None
+    mod_s1 = next(o for o in entry[0].hirc.objects if isinstance(o, CAkSound) and o.id == 7010)
+    mod_s2 = next(o for o in entry[0].hirc.objects if isinstance(o, CAkSound) and o.id == 7020)
+    assert mod_s1.source_id == 70010
+    assert mod_s2.source_id == 70020
+    assert (project.audio_dir / "70010.wem").is_file()
+
+    window._on_build_pack_triggered()
+    output_pack = Path(project.manifest.output_pack_path)
+    assert output_pack.is_file()
+    assert_pack_engine_playable(output_pack)
+
+    # Verify Undo/Redo
+    assert window.act_undo.isEnabled() is True
+    window.act_undo.trigger()
+    assert bv_store.session.get_loaded_entry("battle_switches.bnk")[0].to_bytes() == vanilla_bytes
+    assert not (project.audio_dir / "70010.wem").is_file()
+
+
+# =============================================================================
+# Job 8: Self-Contained Bank Media Node Replacement & Pack Export
+# =============================================================================
+
+
+def test_job8_self_contained_bank_media_node_replacement_and_pack_export(
+    qtbot, tmp_path: Path, monkeypatch
+):
+    """Job 8: Replace media:80001 in a self-contained bank with embedded DATA chunk and promote CAkSound."""
+    monkeypatch.setenv("APPDATA", str(tmp_path / "FakeAppData8"))
+
+    dummy_payload = build_silent_pcm_wem_bytes(duration_ms=60, sample_rate=32000)
+    didx_entries = [DidxEntry(file_id=80001, offset=0, size=len(dummy_payload))]
+    sound = CAkSound(
+        id=8001,
+        source_id=80001,
+        file_id=80,
+        stream_type=0,
+        plugin_id=0x00040001,
+    )
+    bank = SoundBank(
+        header=BkhdChunk(bank_id=80, version=112),
+        didx=DidxChunk(entries=didx_entries),
+        data=DataChunk(data=dummy_payload),
+        hirc=HircChunk(objects=[sound]),
+    )
+    vanilla_bytes = bank.to_bytes()
+
+    window, project, _ = _setup_e2e_project(tmp_path, "Job8Mod", {"surface_fx.bnk": bank})
+    qtbot.addWidget(window)
+
+    bv_store = window.bank_viewer_store
+    bv_view = window.bank_viewer_view
+    bv_store.select_bank("surface_fx.bnk")
+    bv_store.select_node("media:80001")
+
+    item_m80001 = bv_view._items_by_key.get("media:80001")
+    assert item_m80001 is not None
+    bv_view.tree_widget.setCurrentItem(item_m80001)
+    item_m80001.setSelected(True)
+    bv_view._on_tree_selection_changed()
+
+    new_hit_wav = make_synthetic_wav(tmp_path / "custom_hit.wav", duration_s=0.3)
+    window.audio_sources_store.select_files([str(new_hit_wav)])
+    qtbot.mouseClick(window.audio_sources_view.btn_apply, Qt.MouseButton.LeftButton)
+
+    # Verify same-bank sound 8001 was promoted to stream_type 2
+    entry = bv_store.session.get_loaded_entry("surface_fx.bnk")
+    assert entry is not None
+    promoted_s = next(o for o in entry[0].hirc.objects if isinstance(o, CAkSound) and o.id == 8001)
+    assert promoted_s.stream_type == 2
+    assert promoted_s.plugin_id == 0x00010001
+    assert "surface_fx.bnk" in project.manifest.modified_banks
+    assert (project.audio_dir / "80001.wem").is_file()
+
+    window._on_build_pack_triggered()
+    output_pack = Path(project.manifest.output_pack_path)
+    assert output_pack.is_file()
+    assert_pack_engine_playable(output_pack)
+
+    # Undo restores stream_type 0
+    assert window.act_undo.isEnabled() is True
+    window.act_undo.trigger()
+    assert bv_store.session.get_loaded_entry("surface_fx.bnk")[0].to_bytes() == vanilla_bytes
+    assert not (project.audio_dir / "80001.wem").is_file()
+
+
+# =============================================================================
+# Job 9: Cross-Bank Shared Overwrite Promotes Unopened Sibling Bank
+# =============================================================================
+
+
+def test_job9_cross_bank_shared_overwrite_promotes_unopened_sibling_bank(
+    qtbot, tmp_path: Path, monkeypatch
+):
+    """Job 9: Overwrite shared WEM 90001 in bank_a.bnk, promoting unopened bank_b.bnk to stream_type 2."""
+    monkeypatch.setenv("APPDATA", str(tmp_path / "FakeAppData9"))
+
+    sound_a = CAkSound(
+        id=101,
+        source_id=90001,
+        file_id=90001,
+        stream_type=0,
+        plugin_id=0x00040001,
+    )
+    bank_a = SoundBank(
+        header=BkhdChunk(bank_id=10, version=112),
+        hirc=HircChunk(objects=[sound_a]),
+    )
+
+    sound_b = CAkSound(
+        id=201,
+        source_id=90001,
+        file_id=90001,
+        stream_type=0,
+        plugin_id=0x00040001,
+    )
+    bank_b = SoundBank(
+        header=BkhdChunk(bank_id=20, version=112),
+        hirc=HircChunk(objects=[sound_b]),
+    )
+
+    banks = {"bank_a.bnk": bank_a, "bank_b.bnk": bank_b}
+    window, project, _ = _setup_e2e_project(tmp_path, "Job9Mod", banks)
+    qtbot.addWidget(window)
+
+    bv_store = window.bank_viewer_store
+    bv_view = window.bank_viewer_view
+    bv_store.select_bank("bank_a.bnk")
+    bv_store.select_node("hirc:101")
+
+    item101 = bv_view._items_by_key.get("hirc:101")
+    assert item101 is not None
+    bv_view.tree_widget.setCurrentItem(item101)
+    item101.setSelected(True)
+    bv_view._on_tree_selection_changed()
+
+    window.coordinator.confirm_replacement_scope = lambda target: (
+        True,
+        ReplacementScope.OVERWRITE,
+    )
+
+    shared_wav = make_synthetic_wav(tmp_path / "shared_hit.wav", duration_s=0.25)
+    window.audio_sources_store.select_files([str(shared_wav)])
+    qtbot.mouseClick(window.audio_sources_view.btn_apply, Qt.MouseButton.LeftButton)
+
+    # Verify both bank_a and unopened bank_b were promoted and saved
+    entry_a = bv_store.session.get_loaded_entry("bank_a.bnk")
+    entry_b = bv_store.session.get_loaded_entry("bank_b.bnk")
+    assert entry_a is not None
+    assert entry_b is not None
+
+    s101 = next(o for o in entry_a[0].hirc.objects if isinstance(o, CAkSound) and o.id == 101)
+    s201 = next(o for o in entry_b[0].hirc.objects if isinstance(o, CAkSound) and o.id == 201)
+    assert s101.stream_type == 2
+    assert s201.stream_type == 2
+    assert s101.plugin_id == 0x00010001
+    assert s201.plugin_id == 0x00010001
+    assert "bank_a.bnk" in project.manifest.modified_banks
+    assert "bank_b.bnk" in project.manifest.modified_banks
+    assert (project.audio_dir / "90001.wem").is_file()
+
+    window._on_build_pack_triggered()
+    output_pack = Path(project.manifest.output_pack_path)
+    assert output_pack.is_file()
+    assert_pack_engine_playable(output_pack)
+
+    # Undo cleans up both
+    assert window.act_undo.isEnabled() is True
+    window.act_undo.trigger()
+    assert bv_store.session.get_loaded_entry("bank_a.bnk")[0].to_bytes() == bank_a.to_bytes()
+    assert bv_store.session.get_loaded_entry("bank_b.bnk")[0].to_bytes() == bank_b.to_bytes()
+
+
+# =============================================================================
+# Job 10: Game Audio Catalog Replacement & Pack Export
+# =============================================================================
+
+
+def test_job10_game_audio_catalog_replacement_and_pack_export(qtbot, tmp_path: Path, monkeypatch):
+    """Job 10: Replace CAkSound with Vorbis WEM 44001 from Game Audio Catalog preserving codec parity."""
+    monkeypatch.setenv("APPDATA", str(tmp_path / "FakeAppData10"))
+
+    # Vorbis WEM 44001 in ambient.bnk DATA chunk (format_tag 0xFFFF)
+    vorbis_header = b"RIFF\x28\x00\x00\x00WAVEfmt \x10\x00\x00\x00\xff\xff\x01\x00\x80>\x00\x00\x00}\x00\x00\x02\x00\x00\x00data\x04\x00\x00\x00TEST"
+    didx = [DidxEntry(file_id=44001, offset=0, size=len(vorbis_header))]
+    ambient_bank = SoundBank(
+        header=BkhdChunk(bank_id=40, version=112),
+        didx=DidxChunk(entries=didx),
+        data=DataChunk(data=vorbis_header),
+    )
+
+    sound_target = CAkSound(
+        id=9901,
+        source_id=11001,
+        file_id=90,
+        stream_type=0,
+        plugin_id=0x00010001,
+    )
+    battle_vo_bank = SoundBank(
+        header=BkhdChunk(bank_id=90, version=112),
+        hirc=HircChunk(objects=[sound_target]),
+    )
+
+    banks = {"ambient.bnk": ambient_bank, "battle_vo.bnk": battle_vo_bank}
+    window, project, _ = _setup_e2e_project(tmp_path, "Job10Mod", banks)
+    qtbot.addWidget(window)
+
+    bv_store = window.bank_viewer_store
+    bv_view = window.bank_viewer_view
+    bv_store.select_bank("battle_vo.bnk")
+    bv_store.select_node("hirc:9901")
+
+    item9901 = bv_view._items_by_key.get("hirc:9901")
+    assert item9901 is not None
+    bv_view.tree_widget.setCurrentItem(item9901)
+    item9901.setSelected(True)
+    bv_view._on_tree_selection_changed()
+
+    # Switch to Game Audio tab and apply catalog entry
+    as_store = window.audio_sources_store
+    as_store.set_active_tab(AudioSourcesTab.GAME_AUDIO)
+    catalog_entry = AudioCatalogEntry(
+        wem_id=44001,
+        source_bank="ambient.bnk",
+        display_name="Ambience_Forest_Day",
+        event_name="Play_Ambience_Forest",
+        is_embedded=True,
+        metadata_tags=("ambient", "forest"),
+    )
+    as_store.select_game_audio_entry(catalog_entry)
+    as_store.apply()
+
+    # Verify WEM 44001 was staged and sound 9901 promoted to Vorbis plugin_id 0x00040001
+    entry = bv_store.session.get_loaded_entry("battle_vo.bnk")
+    assert entry is not None
+    mod_s = next(o for o in entry[0].hirc.objects if isinstance(o, CAkSound) and o.id == 9901)
+    assert mod_s.source_id == 44001
+    assert mod_s.stream_type == 2
+    assert mod_s.plugin_id == 0x00040001
+    assert (project.audio_dir / "44001.wem").is_file()
+
+    window._on_build_pack_triggered()
+    output_pack = Path(project.manifest.output_pack_path)
+    assert output_pack.is_file()
+    assert_pack_engine_playable(output_pack)
+
+
+# =============================================================================
+# Job 11: Mute Workflow & Pre-Flight Export Guard
+# =============================================================================
+
+
+def test_job11_mute_workflow_and_preflight_export_guard(qtbot, tmp_path: Path, monkeypatch):
+    """Job 11: Mute CAkSound with 1.wem, verify undo cleanup, and assert pre-flight guard blocks corrupt export."""
+    monkeypatch.setenv("APPDATA", str(tmp_path / "FakeAppData11"))
+
+    sound = CAkSound(
+        id=1101,
+        source_id=55001,
+        file_id=11,
+        stream_type=2,
+        plugin_id=0x00010001,
+    )
+    bank = SoundBank(
+        header=BkhdChunk(bank_id=11, version=112),
+        hirc=HircChunk(objects=[sound]),
+    )
+
+    window, project, cache_dir = _setup_e2e_project(tmp_path, "Job11Mod", {"battle_mute.bnk": bank})
+    (cache_dir / "55001.wem").write_bytes(
+        build_silent_pcm_wem_bytes(duration_ms=100, sample_rate=32000)
+    )
+    qtbot.addWidget(window)
+
+    bv_store = window.bank_viewer_store
+    bv_view = window.bank_viewer_view
+    bv_store.select_bank("battle_mute.bnk")
+    bv_store.select_node("hirc:1101")
+
+    item1101 = bv_view._items_by_key.get("hirc:1101")
+    assert item1101 is not None
+    bv_view.tree_widget.setCurrentItem(item1101)
+    item1101.setSelected(True)
+    bv_view._on_tree_selection_changed()
+
+    # Mute node via Silence button
+    window.audio_sources_store.apply_silence()
+
+    # Verify 1.wem staged and sound retargeted
+    entry = bv_store.session.get_loaded_entry("battle_mute.bnk")
+    assert entry is not None
+    muted_s = next(o for o in entry[0].hirc.objects if isinstance(o, CAkSound) and o.id == 1101)
+    assert muted_s.source_id == 1
+    assert muted_s.stream_type == 2
+    assert muted_s.plugin_id == 0x00010001
+    assert 1 in project.manifest.staged_wems
+    assert (project.audio_dir / "1.wem").is_file()
+
+    window._on_build_pack_triggered()
+    output_pack = Path(project.manifest.output_pack_path)
+    assert output_pack.is_file()
+    assert_pack_engine_playable(output_pack)
+
+    # Undo cleans up 1.wem completely
+    assert window.act_undo.isEnabled() is True
+    window.act_undo.trigger()
+    assert 1 not in project.manifest.staged_wems
+    assert not (project.audio_dir / "1.wem").is_file()
+
+    # Test Pre-Flight Export Guard blocking invalid exports
+    # Inject an invalid non-audio file into pack_root/audio/
+    (project.audio_dir / "stray_cheat.txt").write_text("ILLEGAL")
+    with pytest.raises(PackPreflightError) as exc_info:
+        project.compile_mod_pack(validate=True)
+    assert "Invalid File in Audio Pack" in str(exc_info.value)
+    (project.audio_dir / "stray_cheat.txt").unlink()

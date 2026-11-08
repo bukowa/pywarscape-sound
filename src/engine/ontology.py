@@ -324,7 +324,7 @@ class MutationRecord:
     @property
     def is_media(self) -> bool:
         """Returns True if this mutation records a media-only replacement."""
-        return self.kind == "media" or self.node_key.startswith("media:")
+        return self.kind == "media"
 
 
 # -----------------------------------------------------------------------------

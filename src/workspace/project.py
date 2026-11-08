@@ -443,19 +443,42 @@ class AudioProject:
         self.save_manifest()
         return dest
 
+    def validate_preflight(self) -> object:
+        """Runs pre-flight verification on staged audio assets in pack_root/audio/."""
+        from src.workspace.health import PackHealthScanner
+
+        return PackHealthScanner.validate_project_preflight(self)
+
     def compile_mod_pack(
         self,
         output_path: Path | str | None = None,
         pack_type: int = 3,
+        *,
+        validate: bool = False,
     ) -> Path:
-        """
-        Compiles all staged audio files from pack_root/audio/ into a Total War PFH4 Mod pack (default PT_MOD = 3).
+        """Compiles all staged audio files from pack_root/audio/ into a Total War PFH4 Mod pack (default PT_MOD = 3).
+
         Updates manifest.output_pack_path if a custom output path is provided.
         Returns the absolute Path of the created .pack file.
         """
         from src.compiler.pfh4_pack import write_pfh4_pack
 
         self.reconcile_manifest_with_disk()
+
+        if validate:
+            from src.workspace.health import PackHealthReport, PackPreflightError
+
+            report = self.validate_preflight()
+            if isinstance(report, PackHealthReport) and report.has_critical_issues:
+                first = next(
+                    i
+                    for i in report.issues
+                    if getattr(getattr(i, "severity", None), "value", "") == "critical_crash"
+                )
+                raise PackPreflightError(
+                    f"Mod pack pre-flight validation failed: {first.title} ({first.description})",
+                    report,
+                )
 
         if output_path is not None:
             dest = self.set_output_pack_path(output_path)
@@ -482,9 +505,13 @@ class AudioProject:
         self,
         output_path: Path | str | None = None,
         pack_type: int = 3,
+        *,
+        validate: bool = False,
     ) -> Path:
         """Alias for compile_mod_pack (defaults to PT_MOD = 3)."""
-        return self.compile_mod_pack(output_path=output_path, pack_type=pack_type)
+        return self.compile_mod_pack(
+            output_path=output_path, pack_type=pack_type, validate=validate
+        )
 
     def register_in_user_script(self, pack_name: str | None = None) -> Path | None:
         """
